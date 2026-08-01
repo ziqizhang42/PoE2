@@ -1,0 +1,23 @@
+FROM node:26-trixie-slim
+
+ARG COREPACK_VERSION=0.35.0
+ARG PNPM_VERSION=11.18.0
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    g++ \
+    make \
+    python3 \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global "corepack@${COREPACK_VERSION}" \
+  && corepack enable pnpm \
+  && corepack install --global "pnpm@${PNPM_VERSION}"
+
+WORKDIR /app
+
+CMD ["sleep", "infinity"]

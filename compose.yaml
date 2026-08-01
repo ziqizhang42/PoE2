@@ -1,0 +1,44 @@
+name: poe2
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: poe2_dev
+      POSTGRES_USER: poe2_dev
+      POSTGRES_PASSWORD: poe2_dev
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  tooling:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles:
+      - tools
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /app
+    init: true
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://poe2_dev:poe2_dev@db:5432/poe2_dev
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - pnpm-store:/pnpm/store
+    command: ["sleep", "infinity"]
+
+volumes:
+  postgres-data:
+  node-modules:
+  pnpm-store:
