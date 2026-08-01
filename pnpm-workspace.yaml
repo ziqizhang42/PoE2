@@ -5,3 +5,11 @@ packages:
 
 engineStrict: true
 storeDir: /pnpm/store
+
+# typescript@7 delegates to a platform-specific binary package. The VS Code
+# native-preview extension resolves it as <tsdk>/../@typescript/<platform-pkg>,
+# which only exists if that scope is hoisted to the root node_modules. Without
+# this, the editor silently falls back to the compiler bundled with the
+# extension instead of the version pinned in package.json.
+publicHoistPattern:
+  - "@typescript/*"

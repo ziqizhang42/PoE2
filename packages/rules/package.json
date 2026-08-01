@@ -15,10 +15,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b tsconfig.build.json",
     "clean": "tsc -b --clean",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --project tsconfig.test.json"
+    "typecheck": "tsc -b tsconfig.test.json"
   }
 }

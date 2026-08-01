@@ -8,7 +8,7 @@ The game rules are documented in [rules.md](./rules.md).
 
 - Docker with Docker Compose
 - Git
-- an editor
+- an editor. VS Code with the Dev Containers extension is configured directly; see [Editor setup](#editor-setup)
 
 ## First-time setup
 
@@ -50,7 +50,7 @@ docker compose run --rm --no-deps tooling bash
 
 `--no-deps` skips starting PostgreSQL. The `tooling` service declares `depends_on: db` with a health condition, so without this flag every command starts the database and waits for its healthcheck to pass. Formatting, linting, type checking, and the current tests do not touch the database, so they use `--no-deps`. Omit the flag for any command that needs a working `DATABASE_URL`.
 
-The tooling service is behind the `tools` Compose profile, so a plain `docker compose up` does not start an idle Node.js container. Explicit `docker compose run ... tooling` commands still work without enabling the profile.
+The tooling service is behind the `tools` Compose profile, so a plain `docker compose up` does not start an idle Node.js container. Explicit `docker compose run ... tooling` commands still work without enabling the profile, as does the dev container, which names the service explicitly.
 
 Most commands are `pnpm`, so an alias is worth defining for a session:
 
@@ -59,6 +59,34 @@ alias pn='docker compose run --rm --no-deps tooling pnpm'
 ```
 
 The rest of this document spells out the full command for copy-paste.
+
+## Editor setup
+
+Dependencies live in a Docker volume rather than on the host, so a host editor cannot resolve any import and reports errors across every file. The language server has to run inside the container.
+
+VS Code does that through [.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json). Install the Dev Containers extension, then run **Dev Containers: Reopen in Container** from the command palette.
+
+It attaches to the same `tooling` service the commands above use, so there is no second image to maintain. On first creation it runs `pnpm install --frozen-lockfile`, because `/app/node_modules` is an empty volume on a fresh clone.
+
+Inside the container, drop the `docker compose run --rm --no-deps tooling` prefix.
+
+Creating the container also installs the extensions this project expects. Formatting runs on save through oxfmt, using the same [.oxfmtrc.json](../.oxfmtrc.json) that `pnpm run format:check` reads, so saving a file cannot introduce a formatting failure in the quality gate.
+
+The integrated terminal already sits in `/app` with the right toolchain on `PATH`. Git works there too. Note that Docker itself is not available inside the container.
+
+Editor settings are seeded into the container when it is created, so **Dev Containers: Rebuild Container** is what applies a change to `Dockerfile.dev`, `compose.yaml`, or the `extensions` list. A change to `settings` alone needs only **Developer: Reload Window**. Rebuilding always works and discards nothing outside the container filesystem.
+
+### TypeScript in the editor
+
+`typescript@7` is the native Go compiler. It ships no `tsserver.js`, so the language service built into VS Code cannot run it and the usual `typescript.tsdk` setting does not apply. Three settings hand TypeScript over to the native-preview extension instead:
+
+- `js/ts.experimental.useTsgo` stands the built-in server down
+- `js/ts.tsdk.path` points the extension at the workspace compiler
+- `publicHoistPattern` in [pnpm-workspace.yaml](../pnpm-workspace.yaml) makes that path resolvable
+
+The extension locates the compiler at `<tsdk>/../@typescript/<platform-package>`, but pnpm's isolated layout never creates `node_modules/@typescript`. Without the hoist pattern the lookup fails silently and the editor uses the compiler bundled with the extension, which is a different version from the one `pnpm check` runs. Changing that setting requires a reinstall, and pnpm prompts once to rebuild `node_modules`.
+
+To confirm which compiler is serving the editor, open the **TypeScript 7** output channel. It logs the resolved binary path on startup.
 
 ## Quality commands
 
@@ -81,11 +109,44 @@ docker compose run --rm --no-deps tooling pnpm run format
 docker compose run --rm --no-deps tooling pnpm run lint:fix
 ```
 
-`build` compiles the TypeScript project references. Remove its output with:
+`build` compiles the TypeScript project references. Because each package's `tsconfig.json` is a solution file, a root `build` walks every reference, which compiles sources and typechecks tests in one pass. Remove its output with:
 
 ```sh
 docker compose run --rm --no-deps tooling pnpm run clean
 ```
+
+## TypeScript project layout
+
+Each workspace package carries three TypeScript configs:
+
+- `tsconfig.json` owns no files. It only references the other two.
+- `tsconfig.build.json` emits `dist`, excludes tests, and sets `types: []`.
+- `tsconfig.test.json` typechecks tests with `noEmit` and `types: ["node"]`.
+
+Sources and tests need different compiler options, which accounts for two of them. Sources emit declarations and must not see Node globals; tests emit nothing and need `@types/node` and vitest.
+
+The third one exists to fix the specific editor problem below.
+
+A language server assigns an open file to the _nearest_ `tsconfig.json`. If that file were the build config, it would exclude `*.test.ts`, so no project would claim a test file and the editor would fall back to an inferred project using TypeScript's stock defaults. Editing a test would then silently skip `noUnusedLocals`, `exactOptionalPropertyTypes`, and everything else in [tsconfig.base.json](../tsconfig.base.json), and the mistake would only surface later as a `pnpm run check` failure.
+
+Making `tsconfig.json` a references-only solution file avoids that. Because it claims no files itself, the language server walks its references and hands the file to whichever project actually contains it:
+
+```
+computeConfigFileName:: score.test.ts :: Result: packages/rules/tsconfig.json
+Project does not contain file (no root files)
+Searching 2 project references
+    tsconfig.build.json -> Project does not contain file
+    tsconfig.test.json  -> Project contains file directly
+Found default configured project: packages/rules/tsconfig.test.json
+```
+
+Sources resolve to `tsconfig.build.json`, tests to `tsconfig.test.json`, and the editor enforces exactly what the quality gate enforces. The three files have to be repeated for each package.
+
+The trace above comes from the **TypeScript 7** output channel, which is where to look if a file ever seems to be missing project settings.
+
+### Adding a package
+
+Copy all three configs and add the package to `references` in the root [tsconfig.json](../tsconfig.json). A root `pnpm run build` then walks every reference; package-level `build` targets `tsconfig.build.json` directly, so tests never reach `dist`.
 
 ## Watch mode
 
