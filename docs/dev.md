@@ -156,7 +156,26 @@ Run the tests in watch mode while working:
 docker compose run --rm --no-deps tooling pnpm run test
 
 docker compose run --rm --no-deps tooling \
-  pnpm --filter @poe2/<workspace> test
+  pnpm exec vitest --project @poe2/<workspace>
+```
+
+## Backend service
+
+Start PostgreSQL and the development backend, wait for both healthchecks, and verify the HTTP endpoint:
+
+```sh
+docker compose --profile app up -d --wait backend
+curl --fail --show-error http://localhost:3000/health
+
+docker compose logs --follow backend
+```
+
+The backend runs in Node.js watch mode with tsx loaded. The `development` export condition makes workspace packages resolve to their TypeScript source, so edits to imported shared packages restart the server without rebuilding `dist`. Production does not enable that condition and resolves compiled JavaScript instead.
+
+Port 3000 is published by default. Override only the host port when it is already occupied:
+
+```sh
+BACKEND_PORT=3001 docker compose --profile app up -d backend
 ```
 
 ## Adding dependencies

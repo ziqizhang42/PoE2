@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2024"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "target": "ES2024",
+    "tsBuildInfoFile": "dist/.tsbuildinfo.test",
+    "types": ["node"]
+  },
+  "references": [{ "path": "../packages/protocol/tsconfig.build.json" }],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist"]
+}

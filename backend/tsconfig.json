@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Solution-style config: it owns no files itself, it just points the editor
+  // (and `tsc -b`) at the real projects. Without this, tsconfig.build.json
+  // excludes *.test.ts and the language server drops test files into an
+  // inferred project using stock compiler options rather than ours.
+  "files": [],
+  "references": [{ "path": "./tsconfig.build.json" }, { "path": "./tsconfig.test.json" }]
+}

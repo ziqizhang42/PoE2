@@ -1,5 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "files": [],
-  "references": [{ "path": "./packages/rules" }]
+  "references": [
+    { "path": "./tsconfig.tools.json" },
+    { "path": "./packages/rules" },
+    { "path": "./packages/protocol" },
+    { "path": "./backend" }
+  ]
 }

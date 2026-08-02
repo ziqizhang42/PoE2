@@ -38,6 +38,42 @@ services:
       - pnpm-store:/pnpm/store
     command: ["sleep", "infinity"]
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles:
+      - app
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /app
+    init: true
+    environment:
+      NODE_ENV: development
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      DATABASE_URL: postgresql://poe2_dev:poe2_dev@db:5432/poe2_dev
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - pnpm-store:/pnpm/store
+    command: ["pnpm", "--filter", "@poe2/backend", "run", "dev"]
+    healthcheck:
+      test: [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1), () =>
+          process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
 volumes:
   postgres-data:
   node-modules:

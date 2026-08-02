@@ -12,14 +12,15 @@
     "format:check": "oxfmt --check .",
     "lint": "oxlint . --deny-warnings --no-error-on-unmatched-pattern",
     "lint:fix": "oxlint . --fix",
-    "test": "pnpm --recursive --if-present run test",
-    "test:run": "pnpm --recursive --if-present run test:run",
+    "test": "vitest",
+    "test:run": "vitest run",
     "typecheck": "pnpm --recursive --if-present run typecheck"
   },
   "devDependencies": {
     "@types/node": "26.1.2",
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
+    "tsx": "4.23.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   },

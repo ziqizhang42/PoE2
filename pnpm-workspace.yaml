@@ -13,3 +13,6 @@ storeDir: /pnpm/store
 # extension instead of the version pinned in package.json.
 publicHoistPattern:
   - "@typescript/*"
+
+allowBuilds:
+  esbuild: true
