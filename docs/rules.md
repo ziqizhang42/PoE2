@@ -36,7 +36,7 @@ Examples:
    - Vertical
    - Diagonal (both directions)
 
-2. **Longest Lines Only:** Lines which are a subset of another line are NOT counted. Only the longest line in each direction counts.
+2. **Maximal Lines Only:** Every maximal contiguous line counts. Shorter lines that are subsets of a maximal line in the same direction are not counted separately.
 
 3. **Overlapping Lines:** Lines can overlap as long as they are not subsets of each other. One piece can count for multiple lines in different directions.
 
