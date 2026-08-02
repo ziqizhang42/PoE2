@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b",
-    "clean": "tsc -b --clean",
+    "build": "tsc -b && pnpm --recursive --if-present run bundle",
+    "clean": "tsc -b --clean && pnpm --recursive --if-present run clean:bundle",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:run",
     "dev": "pnpm --recursive --parallel --if-present run dev",
     "format": "oxfmt .",
@@ -14,7 +14,7 @@
     "lint:fix": "oxlint . --fix",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "pnpm --recursive --if-present run typecheck"
+    "typecheck": "tsc -b tsconfig.tools.json && pnpm --recursive --if-present run typecheck"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

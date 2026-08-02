@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 const rulesRoot = fileURLToPath(new URL("./packages/rules", import.meta.url));
 const protocolRoot = fileURLToPath(new URL("./packages/protocol", import.meta.url));
 const backendRoot = fileURLToPath(new URL("./backend", import.meta.url));
+const frontendRoot = fileURLToPath(new URL("./frontend", import.meta.url));
 
 export default defineConfig({
   resolve: {
@@ -34,6 +35,15 @@ export default defineConfig({
         test: {
           name: "@poe2/backend",
           root: backendRoot,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          environment: "jsdom",
+          name: "@poe2/frontend",
+          root: frontendRoot,
+          setupFiles: ["src/test/setup.ts"],
         },
       },
     ],

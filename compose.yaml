@@ -74,6 +74,40 @@ services:
       retries: 10
       start_period: 5s
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles:
+      - app
+    depends_on:
+      backend:
+        condition: service_healthy
+    working_dir: /app
+    init: true
+    environment:
+      NODE_ENV: development
+      BACKEND_ORIGIN: http://backend:3000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - pnpm-store:/pnpm/store
+    command: ["pnpm", "--filter", "@poe2/frontend", "run", "dev"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173').then((response) => process.exit(response.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
 volumes:
   postgres-data:
   node-modules:

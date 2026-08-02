@@ -5,6 +5,7 @@
     { "path": "./tsconfig.tools.json" },
     { "path": "./packages/rules" },
     { "path": "./packages/protocol" },
-    { "path": "./backend" }
+    { "path": "./backend" },
+    { "path": "./frontend" }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "composite": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "target": "ES2024",
+    "tsBuildInfoFile": "../node_modules/.cache/frontend.build.tsbuildinfo",
+    "types": ["vite/client"]
+  },
+  "references": [{ "path": "../packages/protocol/tsconfig.build.json" }],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist", "src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
+}

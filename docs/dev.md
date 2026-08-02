@@ -109,7 +109,7 @@ docker compose run --rm --no-deps tooling pnpm run format
 docker compose run --rm --no-deps tooling pnpm run lint:fix
 ```
 
-`build` compiles the TypeScript project references. Because each package's `tsconfig.json` is a solution file, a root `build` walks every reference, which compiles sources and typechecks tests in one pass. Remove its output with:
+`build` first compiles and typechecks the TypeScript project-reference graph. Because each package's `tsconfig.json` is a solution file, a root build walks every referenced source, test, and tool project. It then runs each workspace's optional `bundle` script. Remove TypeScript and bundle output with:
 
 ```sh
 docker compose run --rm --no-deps tooling pnpm run clean
@@ -117,19 +117,22 @@ docker compose run --rm --no-deps tooling pnpm run clean
 
 ## TypeScript project layout
 
-Each workspace package carries three TypeScript configs:
+Every workspace has a references-only `tsconfig.json`. It owns no files itself; it points the editor and `tsc -b` at the projects that actually own each file.
 
-- `tsconfig.json` owns no files. It only references the other two.
+Backend and shared packages reference two projects:
+
 - `tsconfig.build.json` emits `dist`, excludes tests, and sets `types: []`.
-- `tsconfig.test.json` typechecks tests with `noEmit` and `types: ["node"]`.
+- `tsconfig.test.json` typechecks sources and tests with `noEmit` and Node.js types.
 
-Sources and tests need different compiler options, which accounts for two of them. Sources emit declarations and must not see Node globals; tests emit nothing and need `@types/node` and vitest.
+The frontend references three projects because its code runs in two environments:
 
-The third one exists to fix the specific editor problem below.
+- `tsconfig.build.json` typechecks browser source, excludes tests, and uses DOM and Vite types. Vite owns JavaScript emission.
+- `tsconfig.test.json` typechecks browser source and jsdom tests without emitting.
+- `tsconfig.node.json` typechecks `vite.config.ts` with Node.js types.
 
-A language server assigns an open file to the _nearest_ `tsconfig.json`. If that file were the build config, it would exclude `*.test.ts`, so no project would claim a test file and the editor would fall back to an inferred project using TypeScript's stock defaults. Editing a test would then silently skip `noUnusedLocals`, `exactOptionalPropertyTypes`, and everything else in [tsconfig.base.json](../tsconfig.base.json), and the mistake would only surface later as a `pnpm run check` failure.
+Sources and tests need different compiler options. The references-only solution file also fixes an editor problem: a language server assigns an open file to the nearest `tsconfig.json`. If that file excluded tests, test files would fall into an inferred project using TypeScript's stock defaults and could silently skip the strict options in [tsconfig.base.json](../tsconfig.base.json).
 
-Making `tsconfig.json` a references-only solution file avoids that. Because it claims no files itself, the language server walks its references and hands the file to whichever project actually contains it:
+With the solution file, the language server walks its references and assigns each file to the project that includes it. For example:
 
 ```
 computeConfigFileName:: score.test.ts :: Result: packages/rules/tsconfig.json
@@ -140,13 +143,13 @@ Searching 2 project references
 Found default configured project: packages/rules/tsconfig.test.json
 ```
 
-Sources resolve to `tsconfig.build.json`, tests to `tsconfig.test.json`, and the editor enforces exactly what the quality gate enforces. The three files have to be repeated for each package.
-
-The trace above comes from the **TypeScript 7** output channel, which is where to look if a file ever seems to be missing project settings.
+The trace comes from the **TypeScript 7** output channel.
 
 ### Adding a package
 
-Copy all three configs and add the package to `references` in the root [tsconfig.json](../tsconfig.json). A root `pnpm run build` then walks every reference; package-level `build` targets `tsconfig.build.json` directly, so tests never reach `dist`.
+Create a references-only `tsconfig.json`, separate build and test projects, and add the workspace to `references` in the root [tsconfig.json](../tsconfig.json). Add another project when package-owned tooling runs in a different environment.
+
+A root `pnpm run build` walks the complete reference graph. Backend and shared package builds emit compiled modules directly; the frontend typechecks through project references and bundles through Vite.
 
 ## Watch mode
 
@@ -159,23 +162,40 @@ docker compose run --rm --no-deps tooling \
   pnpm exec vitest --project @poe2/<workspace>
 ```
 
-## Backend service
+## Development services
 
-Start PostgreSQL and the development backend, wait for both healthchecks, and verify the HTTP endpoint:
+Start the full development stack and wait for PostgreSQL, the backend, and the frontend to become healthy:
+
+```sh
+docker compose --profile app up -d --wait frontend
+docker compose ps
+```
+
+Open [http://localhost:5173](http://localhost:5173) in a browser. Verify both the Vite server and its backend proxy from the command line:
+
+```sh
+curl --fail --show-error http://localhost:5173/
+curl --fail --show-error http://localhost:5173/health
+
+docker compose logs --follow frontend backend
+```
+
+The frontend runs Vite with React Refresh and Tailwind. Requests to `/health` are proxied to the backend using the internal `http://backend:3000` Compose address.
+
+The backend runs in Node.js watch mode with tsx loaded. The `development` export condition makes workspace packages resolve to their TypeScript source, so edits to imported shared packages restart the server without rebuilding `dist`. Production does not enable that condition and resolves compiled JavaScript instead.
+
+The frontend and backend publish ports 5173 and 3000 by default. Override only their host ports when necessary; container-to-container addresses do not change:
+
+```sh
+FRONTEND_PORT=5174 BACKEND_PORT=3001 \
+  docker compose --profile app up -d frontend
+```
+
+To run only PostgreSQL and the backend:
 
 ```sh
 docker compose --profile app up -d --wait backend
 curl --fail --show-error http://localhost:3000/health
-
-docker compose logs --follow backend
-```
-
-The backend runs in Node.js watch mode with tsx loaded. The `development` export condition makes workspace packages resolve to their TypeScript source, so edits to imported shared packages restart the server without rebuilding `dist`. Production does not enable that condition and resolves compiled JavaScript instead.
-
-Port 3000 is published by default. Override only the host port when it is already occupied:
-
-```sh
-BACKEND_PORT=3001 docker compose --profile app up -d backend
 ```
 
 ## Adding dependencies
@@ -251,6 +271,8 @@ Source code is bind-mounted at `/app`. Installed dependencies and the pnpm conte
 Host installs are unsupported. `pnpm install` on the host would most likely fail outright, since `storeDir` points at `/pnpm/store` inside the container, and anything it did produce would target the host platform rather than Linux.
 
 The first install into an empty store downloads all packages. Later installs reuse the named volumes. A one-time prompt to rebuild `node_modules` is expected after changing pnpm's store or module configuration.
+
+pnpm also creates ignored `node_modules` directories inside workspace packages. These contain symlinks into `/app/node_modules/.pnpm`; the dependency payload still lives in the Docker volume. Because source is bind-mounted, the symlink directories are visible on the host and may appear broken to host tools. They are expected and are recreated by the containerized install.
 
 ## Troubleshooting
 
