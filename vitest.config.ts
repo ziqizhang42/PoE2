@@ -35,6 +35,8 @@ export default defineConfig({
         test: {
           name: "@poe2/backend",
           root: backendRoot,
+          include: ["src/**/*.test.ts"],
+          exclude: ["src/**/*.integration.test.ts"],
         },
       },
       {

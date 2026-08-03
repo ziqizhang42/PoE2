@@ -13,6 +13,7 @@
     "lint": "oxlint . --deny-warnings --no-error-on-unmatched-pattern",
     "lint:fix": "oxlint . --fix",
     "test": "vitest",
+    "test:integration": "pnpm --filter @poe2/backend run test:integration",
     "test:run": "vitest run",
     "typecheck": "tsc -b tsconfig.tools.json && pnpm --recursive --if-present run typecheck"
   },

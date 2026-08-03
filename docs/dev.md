@@ -32,6 +32,13 @@ docker compose exec -T db psql \
   -c 'select current_user, current_database(), version();'
 ```
 
+Then apply the committed migrations:
+
+```sh
+docker compose run --rm tooling \
+  pnpm --filter @poe2/backend run db:migrate
+```
+
 ## Running project commands
 
 Run project commands through the `tooling` service:
@@ -48,7 +55,7 @@ docker compose run --rm --no-deps tooling bash
 
 `--rm` removes the temporary command container when it exits. It does not remove the persistent `node-modules`, `pnpm-store`, or `postgres-data` volumes.
 
-`--no-deps` skips starting PostgreSQL. The `tooling` service declares `depends_on: db` with a health condition, so without this flag every command starts the database and waits for its healthcheck to pass. Formatting, linting, type checking, and the current tests do not touch the database, so they use `--no-deps`. Omit the flag for any command that needs a working `DATABASE_URL`.
+`--no-deps` skips starting PostgreSQL. The `tooling` service declares `depends_on: db` with a health condition, so without this flag every command starts the database and waits for its healthcheck to pass. Formatting, linting, type checking, and the default unit test suite do not touch the database, so they use `--no-deps`. Omit the flag for any command that needs a working `DATABASE_URL`.
 
 The tooling service is behind the `tools` Compose profile, so a plain `docker compose up` does not start an idle Node.js container. Explicit `docker compose run ... tooling` commands still work without enabling the profile, as does the dev container, which names the service explicitly.
 
@@ -108,6 +115,14 @@ docker compose run --rm --no-deps tooling pnpm run build
 docker compose run --rm --no-deps tooling pnpm run format
 docker compose run --rm --no-deps tooling pnpm run lint:fix
 ```
+
+Database integration tests run separately because they require PostgreSQL:
+
+```sh
+docker compose --profile test run --rm integration-tests
+```
+
+This starts the isolated `db-test` service, applies all committed migrations, and runs the integration suite. It does not use or modify the persistent development database.
 
 `build` first compiles and typechecks the TypeScript project-reference graph. Because each package's `tsconfig.json` is a solution file, a root build walks every referenced source, test, and tool project. It then runs each workspace's optional `bundle` script. Remove TypeScript and bundle output with:
 
@@ -255,6 +270,41 @@ POSTGRES_PORT=5433 docker compose up -d db
 ```
 
 That applies to one command. To persist the override, put `POSTGRES_PORT=5433` in `.env`, which Compose loads automatically and Git ignores.
+
+### Migrations
+
+The Drizzle schema is in `backend/src/db/schema.ts`. Generated SQL migrations and their metadata are committed under `backend/drizzle/`.
+
+After changing the schema, generate a named migration:
+
+```sh
+docker compose run --rm --no-deps tooling \
+  pnpm --dir backend exec drizzle-kit generate \
+  --config drizzle.config.ts \
+  --name=add_games
+```
+
+Inspect the generated SQL, then verify the migration history:
+
+```sh
+docker compose run --rm --no-deps tooling \
+  pnpm --filter @poe2/backend run db:check
+```
+
+Apply committed migrations to the persistent development database:
+
+```sh
+docker compose run --rm tooling \
+  pnpm --filter @poe2/backend run db:migrate
+```
+
+The integration database is profile-gated, has no published port, and stores data in memory. Remove it when a completely fresh test database is wanted:
+
+```sh
+docker compose rm --stop --force db-test
+```
+
+This removes only disposable test data. It does not affect `db` or the `postgres-data` volume.
 
 Stop services while preserving all named volumes:
 

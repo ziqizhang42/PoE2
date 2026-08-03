@@ -10,5 +10,5 @@
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.tools.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["vitest.config.ts"]
+  "include": ["backend/drizzle.config.ts", "vitest.config.ts", "vitest.integration.config.ts"]
 }
