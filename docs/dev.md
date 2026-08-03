@@ -195,7 +195,7 @@ curl --fail --show-error http://localhost:5173/health
 docker compose logs --follow frontend backend
 ```
 
-The frontend runs Vite with React Refresh and Tailwind. Requests to `/health` are proxied to the backend using the internal `http://backend:3000` Compose address.
+The frontend runs Vite with React Refresh and Tailwind. Requests to `/health` and `/api` are proxied to the backend using the internal `http://backend:3000` Compose address.
 
 The backend runs in Node.js watch mode with tsx loaded. The `development` export condition makes workspace packages resolve to their TypeScript source, so edits to imported shared packages restart the server without rebuilding `dist`. Production does not enable that condition and resolves compiled JavaScript instead.
 
@@ -211,6 +211,45 @@ To run only PostgreSQL and the backend:
 ```sh
 docker compose --profile app up -d --wait backend
 curl --fail --show-error http://localhost:3000/health
+```
+
+### Testing authentication
+
+Development usernames persist in PostgreSQL, so re-running the same example twice fails with `username_taken`. Use a timestamped username to keep examples repeatable:
+
+```sh
+auth_username="dev_$(date +%s)"
+auth_cookie_jar="$(mktemp)"
+```
+
+Register a user, keeping cookies in a temporary jar so the session persists across requests:
+
+```sh
+curl --fail --show-error \
+  --cookie-jar "$auth_cookie_jar" \
+  --header 'content-type: application/json' \
+  --data "{\"username\":\"$auth_username\",\"password\":\"correct horse battery staple\"}" \
+  http://localhost:5173/api/auth/register
+```
+
+Confirm the session cookie authenticates subsequent requests:
+
+```sh
+curl --fail --show-error \
+  --cookie "$auth_cookie_jar" \
+  http://localhost:5173/api/auth/session
+```
+
+Log out, which clears the session, then remove the temporary cookie jar:
+
+```sh
+curl --fail --show-error \
+  --cookie "$auth_cookie_jar" \
+  --cookie-jar "$auth_cookie_jar" \
+  --request DELETE \
+  http://localhost:5173/api/auth/session
+
+rm -f -- "$auth_cookie_jar"
 ```
 
 ## Adding dependencies

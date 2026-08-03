@@ -9,6 +9,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/api": {
+        changeOrigin: true,
+        target: backendOrigin,
+      },
       "/health": {
         changeOrigin: true,
         target: backendOrigin,
