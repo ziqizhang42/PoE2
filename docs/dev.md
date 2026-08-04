@@ -199,7 +199,29 @@ The frontend runs Vite with React Refresh and Tailwind. Requests to `/health` an
 
 The backend runs in Node.js watch mode with tsx loaded. The `development` export condition makes workspace packages resolve to their TypeScript source, so edits to imported shared packages restart the server without rebuilding `dist`. Production does not enable that condition and resolves compiled JavaScript instead.
 
-The frontend and backend publish ports 5173 and 3000 by default. Override only their host ports when necessary; container-to-container addresses do not change:
+### Client addresses through the proxy
+
+Browser traffic reaches the backend through the Vite container, so from Fastify's point of view every request arrives from that one container. Left alone, that would give every browser the same rate-limit key.
+
+The Vite proxy therefore sets `xfwd: true` in [vite.config.ts](../frontend/vite.config.ts), which appends the connection's real peer address to `x-forwarded-for`. The backend reads `TRUST_PROXY_HOPS`, which Compose sets to `1`, and trusts exactly that one hop, so `request.ip` becomes the real client.
+
+`TRUST_PROXY_HOPS` defaults to `0`, meaning no forwarding header is trusted at all, and it accepts no value above `1`. An unconfigured backend is therefore reachable directly without honouring headers anyone can send. Fastify is never configured with `trustProxy: true`, which would trust the whole chain.
+
+Because Fastify skips only the one trusted hop and takes the address that hop appended, a client reaching the backend **through Vite** cannot choose its own key: whatever it puts in `x-forwarded-for` always sits to the left of the address Vite appended, and is discarded.
+
+Note that Fastify's hop count is positional, not address-based: hop 0 is whoever opened the socket, and it is trusted unconditionally. Anything that can connect to the backend directly - a process on the developer's machine, or another container on the Compose network - can therefore set `request.ip` to any value it likes and pick its own rate-limit bucket:
+
+```sh
+curl -H 'x-forwarded-for: 9.9.9.9' http://localhost:3000/api/auth/session
+```
+
+That is accepted here because everything inside the development stack is already trusted, and because the published ports are loopback-only. It is not acceptable in production. Pinning a specific reverse-proxy address needs a `trustProxy` **function** rather than a hop count, and belongs with the production deployment work; a bare CIDR string would be worse than the hop count, because it walks the whole chain while addresses stay private.
+
+Adding a second proxy in front of Vite would also break the count. Raise the ceiling in [server.ts](../backend/src/config/server.ts) deliberately when that happens.
+
+### Published ports
+
+The frontend and backend publish ports 5173 and 3000 by default, and PostgreSQL publishes 5432. All three are bound to `127.0.0.1`, so a development stack is reachable from the machine running it and not from the rest of the network. Container-to-container addresses are unaffected by this and by any host-port override:
 
 ```sh
 FRONTEND_PORT=5174 BACKEND_PORT=3001 \
@@ -212,6 +234,23 @@ To run only PostgreSQL and the backend:
 docker compose --profile app up -d --wait backend
 curl --fail --show-error http://localhost:3000/health
 ```
+
+### Authentication limits
+
+Two independent rate limits protect the authentication routes, both keyed in memory in the single backend process. A shared store is deferred until there is more than one.
+
+- **Per client address.** At most x register or login requests per minute from one `request.ip`, applied before any expensive work. Register and login share this budget.
+- **Per normalized username.** At most x _failed_ logins per five minutes against one account, however many addresses they come from. Usernames are normalized case-insensitively, so `Player_One` and `PLAYER_ONE` share one budget. Successful logins are not counted, and registration is not subject to this limit.
+
+Both answer with the same `429` body and the same fixed `Retry-After`, so a caller cannot tell which limit it hit or whether the username exists.
+
+The username limit is a deliberate trade-off: an attacker who knows a username can still lock that account out for a while, but this stops credential stuffing and password guessing against a known account.
+
+Password hashing is bounded separately. At most `PASSWORD_KDF_MAX_CONCURRENT` operations run at once with at most `PASSWORD_KDF_MAX_QUEUED` waiting (FIFO). Beyond that the backend sheds load immediately with a `503` and a short `Retry-After` rather than queueing unbounded work. That response is identical whether or not the username exists.
+
+Stored password hashes carry the Argon2 parameters they were produced with, so the cost policy can be raised without locking anyone out: an older hash is verified with its own parameters and rewritten under the current policy on the next successful login. Parameters are bounds-checked, and the stored value's length is capped, before Argon2 is invoked or anything is decoded, so a tampered row cannot request an enormous amount of memory or work.
+
+Verifying with the parameters stored per hash means rejections would otherwise cost different amounts: an account still on an older, cheaper policy would answer faster than one that does not exist, which is exactly the existence oracle the generic error is there to prevent. Every rejected login therefore spends at least one current-policy derivation. That bounds the difference rather than erasing it so a wrong password against an older hash still pays that cheaper verification on top, so it lands slightly slower than the rest and the gap disappears as logins migrate hashes forward.
 
 ### Testing authentication
 
@@ -292,7 +331,7 @@ docker compose build --pull tooling
 
 ## PostgreSQL
 
-PostgreSQL is available to other Compose services at `db:5432`. From the host, it is available at `localhost:5432` by default.
+PostgreSQL is available to other Compose services at `db:5432`. From the host, it is available at `127.0.0.1:5432` by default; like the other development ports it is published on loopback only.
 
 The `tooling` service receives the connection string as `DATABASE_URL`:
 

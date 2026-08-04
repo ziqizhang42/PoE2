@@ -83,12 +83,16 @@ describe("authentication response schemas", () => {
     ).toBe(false);
   });
 
-  it.each(["invalid_credentials", "rate_limited", "unauthenticated", "username_taken"])(
-    "accepts the %s error code",
-    (code) => {
-      expect(
-        AuthErrorResponseSchema.safeParse({ code, message: "Authentication failed" }).success,
-      ).toBe(true);
-    },
-  );
+  it.each([
+    "internal_error",
+    "invalid_credentials",
+    "rate_limited",
+    "temporarily_unavailable",
+    "unauthenticated",
+    "username_taken",
+  ])("accepts the %s error code", (code) => {
+    expect(
+      AuthErrorResponseSchema.safeParse({ code, message: "Authentication failed" }).success,
+    ).toBe(true);
+  });
 });

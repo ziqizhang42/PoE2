@@ -22,9 +22,23 @@ export interface CreateSessionInput {
   readonly expiresAt: Date;
 }
 
+export interface UpdateUserPasswordHashInput {
+  readonly userId: string;
+  /** The hash the caller verified against, so a concurrent upgrade wins once. */
+  readonly previousHash: string;
+  readonly passwordHash: string;
+  readonly updatedAt: Date;
+}
+
 export interface AuthRepository {
   createUserWithSession(input: CreateUserWithSessionInput): Promise<AuthUser | null>;
   findUserByNormalizedUsername(normalizedUsername: string): Promise<StoredUser | null>;
+  /**
+   * Rewrites a stored password hash in place. Returns whether a row changed:
+   * `false` means another request already replaced the same hash, which is a
+   * harmless race, not a failure.
+   */
+  updateUserPasswordHash(input: UpdateUserPasswordHashInput): Promise<boolean>;
   createSession(input: CreateSessionInput): Promise<void>;
   findUserBySessionTokenHash(tokenHash: string, now: Date): Promise<AuthUser | null>;
   deleteSessionByTokenHash(tokenHash: string): Promise<void>;
@@ -72,6 +86,16 @@ export function createAuthRepository(db: Database): AuthRepository {
         .limit(1);
 
       return user ?? null;
+    },
+
+    async updateUserPasswordHash(input) {
+      const updated = await db
+        .update(users)
+        .set({ passwordHash: input.passwordHash, updatedAt: input.updatedAt })
+        .where(and(eq(users.id, input.userId), eq(users.passwordHash, input.previousHash)))
+        .returning({ id: users.id });
+
+      return updated.length > 0;
     },
 
     async createSession(input) {

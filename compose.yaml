@@ -8,7 +8,9 @@ services:
       POSTGRES_USER: poe2_dev
       POSTGRES_PASSWORD: poe2_dev
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback-only: a development database must not be reachable from
+      # other hosts on the network the developer happens to be on.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
@@ -90,9 +92,15 @@ services:
       NODE_ENV: development
       HOST: "0.0.0.0"
       PORT: "3000"
+      # Exactly one hop: the Vite container in the `frontend` service. Fastify
+      # skips that hop and uses the address Vite appended, so a client-supplied
+      # x-forwarded-for entry sent through Vite is discarded. The hop count is
+      # positional, so whatever opens the socket is still trusted; the published
+      # port below is loopback-only for that reason.
+      TRUST_PROXY_HOPS: "1"
       DATABASE_URL: postgresql://poe2_dev:poe2_dev@db:5432/poe2_dev
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
     volumes:
       - .:/app
       - node-modules:/app/node_modules
@@ -126,7 +134,7 @@ services:
       NODE_ENV: development
       BACKEND_ORIGIN: http://backend:3000
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
     volumes:
       - .:/app
       - node-modules:/app/node_modules

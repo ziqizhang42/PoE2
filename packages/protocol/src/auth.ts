@@ -6,8 +6,10 @@ export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 
 export type AuthErrorCode =
+  | "internal_error"
   | "invalid_credentials"
   | "rate_limited"
+  | "temporarily_unavailable"
   | "unauthenticated"
   | "username_taken";
 
@@ -66,6 +68,13 @@ export const AuthSessionResponseSchema: z.ZodType<AuthSessionResponse> = z.stric
 });
 
 export const AuthErrorResponseSchema: z.ZodType<AuthErrorResponse> = z.strictObject({
-  code: z.enum(["invalid_credentials", "rate_limited", "unauthenticated", "username_taken"]),
+  code: z.enum([
+    "internal_error",
+    "invalid_credentials",
+    "rate_limited",
+    "temporarily_unavailable",
+    "unauthenticated",
+    "username_taken",
+  ]),
   message: z.string().min(1),
 });
