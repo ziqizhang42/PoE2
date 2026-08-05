@@ -10,8 +10,13 @@ import { readAuthConfig } from "./config/auth.js";
 import { readDatabaseConfig } from "./config/database.js";
 import { readKdfConfig } from "./config/kdf.js";
 import { readServerConfig } from "./config/server.js";
+import { readWebSocketConfig } from "./config/websocket.js";
 import { createDatabaseClient } from "./db/client.js";
+import { createGameRepository } from "./game/repository.js";
+import { createGameService } from "./game/service.js";
 import { authPlugin } from "./http/auth.js";
+import { createConnectionHub } from "./http/ws-hub.js";
+import { registerWebSocket } from "./http/ws.js";
 
 /**
  * The whole environment is validated up front, before anything is constructed.
@@ -27,6 +32,7 @@ function readConfig(environment: Readonly<Record<string, string | undefined>>) {
       auth: readAuthConfig(environment),
       database: readDatabaseConfig(environment),
       kdf: readKdfConfig(environment),
+      webSocket: readWebSocketConfig(environment),
     };
   } catch (error) {
     console.error("invalid configuration", error);
@@ -51,6 +57,14 @@ try {
   app.register(authPlugin, {
     ...config.auth,
     service: authService,
+  });
+
+  await registerWebSocket(app, {
+    ...config.auth,
+    ...config.webSocket,
+    authService,
+    gameService: createGameService(createGameRepository(database.db)),
+    hub: createConnectionHub(),
   });
 
   await app.listen(config.server.listen);

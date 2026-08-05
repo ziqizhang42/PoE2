@@ -98,6 +98,11 @@ services:
       # positional, so whatever opens the socket is still trusted; the published
       # port below is loopback-only for that reason.
       TRUST_PROXY_HOPS: "1"
+      # The only browser origin allowed to open /api/ws. A WebSocket upgrade
+      # ignores the same-origin policy but still sends the session cookie, so
+      # this list is what keeps another page from opening an authenticated
+      # socket. There is no wildcard, and production must set it explicitly.
+      WEBSOCKET_ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
       DATABASE_URL: postgresql://poe2_dev:poe2_dev@db:5432/poe2_dev
     ports:
       - "127.0.0.1:${BACKEND_PORT:-3000}:3000"

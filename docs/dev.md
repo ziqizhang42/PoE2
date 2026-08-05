@@ -2,7 +2,7 @@
 
 PoE2 uses a Docker-only development workflow.
 
-The game rules are documented in [rules.md](./rules.md).
+The game rules are documented in [rules.md](./rules.md), and the browser WebSocket protocol in [protocol.md](./protocol.md).
 
 ## Host requirements
 
@@ -122,7 +122,16 @@ Database integration tests run separately because they require PostgreSQL:
 docker compose --profile test run --rm integration-tests
 ```
 
-This starts the isolated `db-test` service, applies all committed migrations, and runs the integration suite. It does not use or modify the persistent development database.
+This starts the isolated `db-test` service, applies all committed migrations, and runs the integration suite. It does not use or modify the persistent development database. The suite covers the authentication routes, the game service against real rows and real row locks, and the WebSocket endpoint end to end.
+
+To prove a new migration applies from nothing rather than on top of an already-migrated test database, discard `db-test` first:
+
+```sh
+docker compose rm --stop --force db-test
+docker compose --profile test run --rm integration-tests
+```
+
+Integration test files run sequentially and each one clears `users` between tests. Games and their move history cascade from `users`, so that single delete still leaves the database empty.
 
 `build` first compiles and typechecks the TypeScript project-reference graph. Because each package's `tsconfig.json` is a solution file, a root build walks every referenced source, test, and tool project. It then runs each workspace's optional `bundle` script. Remove TypeScript and bundle output with:
 
@@ -219,6 +228,30 @@ That is accepted here because everything inside the development stack is already
 
 Adding a second proxy in front of Vite would also break the count. Raise the ceiling in [server.ts](../backend/src/config/server.ts) deliberately when that happens.
 
+### Vite WebSocket proxy
+
+The `/api` proxy rule sets `ws: true`, so the same rule carries both HTTP requests and the WebSocket upgrade at `/api/ws`. A browser on the dev server connects to `ws://localhost:5173/api/ws` and Vite forwards the upgrade to `http://backend:3000`, keeping `xfwd` and the client-address handling described above.
+
+`changeOrigin: true` rewrites the `Host` header but leaves `Origin` alone, which matters: `Origin` is what the backend checks, and it must stay the browser's real origin.
+
+### Allowed WebSocket origin
+
+A WebSocket upgrade is not subject to the same-origin policy but still sends the session cookie, so `Origin` is the only thing keeping another page from opening an authenticated socket. The backend checks it against `WEBSOCKET_ALLOWED_ORIGINS`, a comma-separated list of exact origins, which Compose sets for the `backend` service:
+
+```
+WEBSOCKET_ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+```
+
+Overriding `FRONTEND_PORT` moves the allowed origin with the published port:
+
+```sh
+FRONTEND_PORT=5174 docker compose --profile app up -d frontend
+```
+
+There is no wildcard. `*` is rejected wherever it appears, and a `production` backend refuses to start without an explicit list. Outside production an unset variable falls back to `http://localhost:5173`.
+
+Missing, malformed, and unlisted origins are all refused with `403` before the upgrade completes; an absent or invalid session cookie is refused with `401`. See [protocol.md](./protocol.md) for the full contract.
+
 ### Published ports
 
 The frontend and backend publish ports 5173 and 3000 by default, and PostgreSQL publishes 5432. All three are bound to `127.0.0.1`, so a development stack is reachable from the machine running it and not from the rest of the network. Container-to-container addresses are unaffected by this and by any host-port override:
@@ -277,6 +310,30 @@ Confirm the session cookie authenticates subsequent requests:
 curl --fail --show-error \
   --cookie "$auth_cookie_jar" \
   http://localhost:5173/api/auth/session
+```
+
+### Testing the WebSocket endpoint
+
+There is no user interface for this yet, so check the handshake directly. With the session cookie from above, an allowed origin answers `101 Switching Protocols`:
+
+```sh
+ws_handshake() {
+  curl --include --no-buffer --max-time 2 \
+    --header 'connection: upgrade' \
+    --header 'upgrade: websocket' \
+    --header 'sec-websocket-version: 13' \
+    --header 'sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==' \
+    "$@" http://localhost:5173/api/ws
+}
+
+ws_handshake --header 'origin: http://localhost:5173' --cookie "$auth_cookie_jar"
+```
+
+The same request from another origin is refused with `403`, and one with no session is refused with `401`:
+
+```sh
+ws_handshake --header 'origin: http://evil.example' --cookie "$auth_cookie_jar"
+ws_handshake --header 'origin: http://localhost:5173'
 ```
 
 Log out, which clears the session, then remove the temporary cookie jar:
@@ -369,12 +426,21 @@ docker compose run --rm --no-deps tooling \
   pnpm --filter @poe2/backend run db:check
 ```
 
-Apply committed migrations to the persistent development database:
+Generating a migration does not apply it anywhere. Verify it against the throwaway integration database first:
+
+```sh
+docker compose rm --stop --force db-test
+docker compose --profile test run --rm integration-tests
+```
+
+Then apply committed migrations to the persistent development database:
 
 ```sh
 docker compose run --rm tooling \
   pnpm --filter @poe2/backend run db:migrate
 ```
+
+A development database that has not been migrated will fail every query the WebSocket endpoint makes.
 
 The integration database is profile-gated, has no published port, and stores data in memory. Remove it when a completely fresh test database is wanted:
 

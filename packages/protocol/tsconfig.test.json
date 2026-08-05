@@ -10,6 +10,7 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo.test",
     "types": ["node"]
   },
+  "references": [{ "path": "../rules/tsconfig.build.json" }],
   "include": ["src/**/*.ts"],
   "exclude": ["dist"]
 }

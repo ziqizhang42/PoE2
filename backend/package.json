@@ -17,7 +17,9 @@
   "dependencies": {
     "@fastify/cookie": "11.1.2",
     "@fastify/rate-limit": "11.2.0",
+    "@fastify/websocket": "11.3.0",
     "@poe2/protocol": "workspace:*",
+    "@poe2/rules": "workspace:*",
     "drizzle-orm": "0.45.2",
     "fastify": "5.11.0",
     "fastify-type-provider-zod": "7.0.0",
@@ -25,6 +27,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@types/ws": "8.18.1",
     "drizzle-kit": "0.31.10"
   }
 }

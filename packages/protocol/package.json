@@ -21,6 +21,7 @@
     "typecheck": "tsc -b tsconfig.test.json"
   },
   "dependencies": {
+    "@poe2/rules": "workspace:*",
     "zod": "4.4.3"
   }
 }

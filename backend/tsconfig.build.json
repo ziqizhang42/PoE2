@@ -15,7 +15,10 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "types": []
   },
-  "references": [{ "path": "../packages/protocol/tsconfig.build.json" }],
+  "references": [
+    { "path": "../packages/protocol/tsconfig.build.json" },
+    { "path": "../packages/rules/tsconfig.build.json" }
+  ],
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "src/**/*.test.ts", "src/**/*.spec.ts"]
 }

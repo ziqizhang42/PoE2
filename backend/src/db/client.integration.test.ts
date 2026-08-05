@@ -14,6 +14,9 @@ const databaseIdentitySchema = z.object({
 const migrationStateSchema = z.object({
   hasUsersTable: z.boolean(),
   hasSessionsTable: z.boolean(),
+  hasGamesTable: z.boolean(),
+  hasGameMovesTable: z.boolean(),
+  hasGameStatusType: z.boolean(),
   hasAppliedMigration: z.boolean(),
 });
 
@@ -42,6 +45,9 @@ describe("database client", () => {
       select
         to_regclass('public.users') is not null as "hasUsersTable",
         to_regclass('public.sessions') is not null as "hasSessionsTable",
+        to_regclass('public.games') is not null as "hasGamesTable",
+        to_regclass('public.game_moves') is not null as "hasGameMovesTable",
+        to_regtype('public.game_status') is not null as "hasGameStatusType",
         (
           select count(*) > 0
           from drizzle.__drizzle_migrations
@@ -51,6 +57,9 @@ describe("database client", () => {
     expect(migrationStateSchema.parse(rows[0])).toEqual({
       hasUsersTable: true,
       hasSessionsTable: true,
+      hasGamesTable: true,
+      hasGameMovesTable: true,
+      hasGameStatusType: true,
       hasAppliedMigration: true,
     });
   });
