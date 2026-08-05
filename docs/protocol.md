@@ -1,6 +1,6 @@
 # Browser WebSocket protocol
 
-Lobbies and live games run over one authenticated WebSocket at `/api/ws`. The game rules it enforces are in [rules.md](./rules.md); the development workflow is in [dev.md](./dev.md).
+Lobbies and live games run over one authenticated WebSocket at `/api/ws`. The game rules it enforces are in [rules.md](./rules.md); the development workflow is in [dev.md](./dev.md), which also describes the [browser runtime](./dev.md#browser-runtime) that speaks this protocol.
 
 The schemas are the specification. They live in [packages/protocol/src/game.ts](../packages/protocol/src/game.ts) and [packages/protocol/src/websocket.ts](../packages/protocol/src/websocket.ts), are shared by both ends, and reuse `@poe2/rules` for every board dimension, cell value, player number, and scoring rule rather than restating them.
 

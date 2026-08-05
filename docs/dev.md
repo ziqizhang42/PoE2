@@ -272,8 +272,8 @@ curl --fail --show-error http://localhost:3000/health
 
 Two independent rate limits protect the authentication routes, both keyed in memory in the single backend process. A shared store is deferred until there is more than one.
 
-- **Per client address.** At most x register or login requests per minute from one `request.ip`, applied before any expensive work. Register and login share this budget.
-- **Per normalized username.** At most x _failed_ logins per five minutes against one account, however many addresses they come from. Usernames are normalized case-insensitively, so `Player_One` and `PLAYER_ONE` share one budget. Successful logins are not counted, and registration is not subject to this limit.
+- **Per client address.** At most 10 register or login requests per minute from one `request.ip`, applied before any expensive work. Register and login share this budget.
+- **Per normalized username.** At most 10 _failed_ logins per five minutes against one account, however many addresses they come from. Usernames are normalized case-insensitively. Successful logins are not counted, and registration is not subject to this limit.
 
 Both answer with the same `429` body and the same fixed `Retry-After`, so a caller cannot tell which limit it hit or whether the username exists.
 
@@ -314,7 +314,7 @@ curl --fail --show-error \
 
 ### Testing the WebSocket endpoint
 
-There is no user interface for this yet, so check the handshake directly. With the session cookie from above, an allowed origin answers `101 Switching Protocols`:
+There is no user interface for this yet - the [browser runtime](#browser-runtime) is headless - so check the handshake directly. With the session cookie from above, an allowed origin answers `101 Switching Protocols`:
 
 ```sh
 ws_handshake() {
@@ -347,6 +347,82 @@ curl --fail --show-error \
 
 rm -f -- "$auth_cookie_jar"
 ```
+
+## Browser runtime
+
+The frontend speaks both server contracts and renders none of it. `App` is still an empty shell, so an interface can be built on top of this rather than replacing it.
+
+| Directory                                       | Owns                                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
+| [frontend/src/auth](../frontend/src/auth)       | The `/api/auth` REST client and the TanStack Query state built on it        |
+| [frontend/src/live](../frontend/src/live)       | The authenticated WebSocket transport and the Zustand store it fills        |
+| [frontend/src/runtime](../frontend/src/runtime) | The runtime object, its React context, and the headless bootstrap component |
+
+`AppProviders` builds one `AppRuntime` - a `QueryClient`, an `AuthClient`, and a `LiveClient` - and renders `RuntimeBootstrap` beside its children. That component returns `null`: it loads the session and opens or closes the socket to match. It takes a `runtime` prop, which is how tests replace any part of it.
+
+Wire shapes come from `@poe2/protocol` and are validated with the schemas the backend uses. No board, score, turn, or result is computed in the browser.
+
+### Authentication state
+
+TanStack Query is the only place authentication state lives - not Zustand, and nothing persistent.
+
+```ts
+const session = useSession(); // AuthUser | null | undefined
+
+const login = useLogin(); // { submit, isPending, error, reset }
+await login.submit({ username, password });
+```
+
+`null` means the server confirmed this browser is signed out; `undefined` only means the answer has not arrived yet. Both ends of the lifecycle are matched exactly rather than by status class: a `401` is a sign-out only when it carries the `unauthenticated` body the shared schema describes, and logout is done on `204` and nothing else.
+
+Failures are an `AuthRequestError` with a `kind`: `network` (no response arrived), `protocol` (one did but failed the shared schema), or `http` (a validated error body, so `status`, `code`, `message`, and `retryAfterSeconds` are all safe to show). `retryAfterSeconds` covers both answers under [Authentication limits](#authentication-limits).
+
+Credentials must not outlive their request, which is why `useLogin` and `useRegister` are a `submit` facade rather than a `UseMutationResult`: a mutation retains its variables for as long as it lives, so a password is never passed as one. Keep that property if you change these hooks.
+
+### Live connection
+
+`LiveClient` holds at most one socket, on the page's own origin so the session cookie is in scope.
+
+```ts
+const status = useLiveStatus(); // idle | connecting | ready | reconnecting | disconnected | unauthenticated
+const lobbies = useLobbies();
+const games = useGames();
+const game = useGame(gameId);
+const rejection = useLastLiveRejection(); // rejections the server could not correlate
+const { createLobby, joinLobby, cancelLobby, playMove } = useLiveCommands();
+
+const result = await playMove({ gameId, expectedRevision, square });
+// { ok: true } | { ok: false, failure: "rejected" | "not_connected" | "connection_lost" | "timed_out", code, message }
+```
+
+Commands never throw, and always settle - on a reply, on a disconnect, or on a timeout. Every incoming frame is validated with `WsServerMessageSchema` and dropped if it fails, and snapshots are applied whole, so a reconnect needs no catch-up.
+
+Reconnection is bounded exponential backoff with jitter. It does **not** reconnect after signing out, after `disconnect()`, or after a `1008` close. That `1008` is the only authentication failure a browser can observe - a refused upgrade looks like any other failed connection - so the client never concludes a session has ended; it asks the session query to re-check.
+
+### Testing the browser runtime
+
+Frontend tests are the `@poe2/frontend` vitest project, running under jsdom with the rest of the unit suite:
+
+```sh
+docker compose run --rm --no-deps tooling pnpm exec vitest run --project @poe2/frontend
+```
+
+They need no server, no database, and no fake global clock, because both transport seams are injected: `createAuthClient({ fetch })` and `createLiveClient({ createSocket, clock, ... })`. Reconnection is tested by firing the scheduled callback and asserting the delay it was handed.
+
+Fixtures and fakes live in [frontend/src/test/fakes.ts](../frontend/src/test/fakes.ts); [providers.tsx](../frontend/src/test/providers.tsx) is the provider stack without `RuntimeBootstrap`, for testing hooks on their own.
+
+To watch the real runtime instead, start the [development services](#development-services) and register from the browser console on [http://localhost:5173](http://localhost:5173), so the session cookie lands in the browser rather than in a `curl` jar:
+
+```js
+await fetch("/api/auth/register", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ username: `dev_${Date.now()}`, password: "correct horse battery staple" }),
+});
+location.reload();
+```
+
+The page stays blank, and the network panel shows the socket at `/api/ws` open and stay open: `RuntimeBootstrap` is already mounted, so a confirmed session is all it needs.
 
 ## Adding dependencies
 
