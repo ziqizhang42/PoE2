@@ -15,6 +15,13 @@
       "when": 1785884703120,
       "tag": "0001_live_games",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786264093345,
+      "tag": "0002_gameplay_and_ratings",
+      "breakpoints": true
     }
   ]
 }

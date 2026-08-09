@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AUTH_SESSION_KEY } from "../auth/queries.ts";
+import { GAMES_QUERY_ROOT } from "../games/query-keys.ts";
 import type { LiveClientOptions } from "../live/client.ts";
-import { createFakeLiveClient, USER_ONE } from "../test/fakes.ts";
+import { PLAYER_QUERY_ROOT } from "../players/query-keys.ts";
+import { createFakeClock, createFakeLiveClient, USER_ONE } from "../test/fakes.ts";
 import { createAppRuntime } from "./create-runtime.ts";
 import { createQueryClient } from "./query-client.ts";
 
@@ -33,6 +35,48 @@ describe("createAppRuntime", () => {
     captured[0]?.onSessionSuspect?.();
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: AUTH_SESSION_KEY });
+  });
+
+  it("invalidates every public profile after a finished game", () => {
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    const captured: LiveClientOptions[] = [];
+
+    createAppRuntime({
+      queryClient,
+      createLive: (options) => {
+        captured.push(options);
+        return createFakeLiveClient();
+      },
+    });
+
+    captured[0]?.onGameHistoryStale?.(USER_ONE.id);
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: PLAYER_QUERY_ROOT });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: GAMES_QUERY_ROOT });
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands the live client its own clock, so there is one timer seam", () => {
+    const clock = createFakeClock();
+    const captured: LiveClientOptions[] = [];
+
+    const runtime = createAppRuntime({
+      clock,
+      createLive: (options) => {
+        captured.push(options);
+        return createFakeLiveClient();
+      },
+    });
+
+    expect(captured[0]?.clock).toBe(clock);
+    expect(runtime.clock).toBe(clock);
+  });
+
+  it("reads a motion preference without one having to be supplied", () => {
+    const runtime = createAppRuntime({ createLive: () => createFakeLiveClient() });
+
+    expect(runtime.motion.prefersReducedMotion()).toBe(false);
   });
 });
 

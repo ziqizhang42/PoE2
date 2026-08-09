@@ -3,6 +3,8 @@ import {
   CELL_COUNT,
   createEmptyBoard,
   gameResult,
+  PLAYER_ONE,
+  PLAYER_TWO,
   replay,
   scoreBoard,
 } from "@poe2/rules";
@@ -15,7 +17,9 @@ import {
   WsCommandAcceptedMessageSchema,
   WsCommandRejectedMessageSchema,
   WsGameClosedMessageSchema,
+  WsGameDeclineMessageSchema,
   WsGameMoveMessageSchema,
+  WsGameReadyMessageSchema,
   WsGameSnapshotMessageSchema,
   WsLobbyCancelMessageSchema,
   WsLobbyCreateMessageSchema,
@@ -23,6 +27,7 @@ import {
   WsLobbySnapshotMessageSchema,
   WsServerMessageSchema,
   WsSessionReadyMessageSchema,
+  WsSessionSyncedMessageSchema,
 } from "./websocket.js";
 
 const REQUEST_ID = "0f2b6b2a-3d70-4ad6-b34e-2d34e8f1e0d5";
@@ -31,9 +36,29 @@ const PLAYER_ONE_USER = { id: "e4aa457e-7620-4f14-ae26-6c20f3995ee1", username: 
 const PLAYER_TWO_USER = { id: "1b5d1bfe-2d8c-4a0e-9d34-9ff5f2f0c8d3", username: "Player_Two" };
 const CREATED_AT = "2026-08-04T10:00:00.000Z";
 
-const lobbyCreate = { type: "lobby.create", requestId: REQUEST_ID };
+const lobbyCreate = {
+  type: "lobby.create",
+  requestId: REQUEST_ID,
+  rated: true,
+  creatorSeat: PLAYER_ONE,
+  timeControl: { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+};
+
+const untimedControl = { kind: "untimed", initialMs: null, incrementMs: null } as const;
 const lobbyJoin = { type: "lobby.join", requestId: REQUEST_ID, gameId: GAME_ID };
 const lobbyCancel = { type: "lobby.cancel", requestId: REQUEST_ID, gameId: GAME_ID };
+const gameReady = {
+  type: "game.ready",
+  requestId: REQUEST_ID,
+  gameId: GAME_ID,
+  readyCheckGeneration: 1,
+};
+const gameDecline = {
+  type: "game.decline",
+  requestId: REQUEST_ID,
+  gameId: GAME_ID,
+  readyCheckGeneration: 1,
+};
 const gameMove = {
   type: "game.move",
   requestId: REQUEST_ID,
@@ -46,13 +71,18 @@ function waitingGame(): unknown {
   return {
     id: GAME_ID,
     revision: 0,
+    rated: false,
+    timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
     status: "waiting",
     players: { playerOne: PLAYER_ONE_USER, playerTwo: null },
+    creatorSeat: PLAYER_ONE,
     board: createEmptyBoard(),
     moves: [],
     scores: { playerOne: 0, playerTwo: 0 },
     sideToMove: null,
-    result: null,
+    outcome: null,
+    clock: null,
+    readyCheck: null,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   };
@@ -68,13 +98,21 @@ function finishedGame(): unknown {
   return {
     id: GAME_ID,
     revision: CELL_COUNT + 1,
+    rated: true,
+    timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
     status: "finished",
     players: { playerOne: PLAYER_ONE_USER, playerTwo: PLAYER_TWO_USER },
     board: replayed.game.board,
     moves: replayed.game.moves,
     scores: scoreBoard(replayed.game.board),
     sideToMove: null,
-    result: gameResult(replayed.game),
+    outcome: {
+      reason: "board_full",
+      winner: gameResult(replayed.game)?.winner,
+      finishedAt: CREATED_AT,
+    },
+    clock: null,
+    readyCheck: null,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   };
@@ -91,13 +129,27 @@ describe("WsClientMessageSchema", () => {
     ["lobby.create", lobbyCreate, WsLobbyCreateMessageSchema],
     ["lobby.join", lobbyJoin, WsLobbyJoinMessageSchema],
     ["lobby.cancel", lobbyCancel, WsLobbyCancelMessageSchema],
+    ["game.ready", gameReady, WsGameReadyMessageSchema],
+    ["game.decline", gameDecline, WsGameDeclineMessageSchema],
     ["game.move", gameMove, WsGameMoveMessageSchema],
   ])("accepts %s through the union and its own schema", (_label, message, schema) => {
     expect(WsClientMessageSchema.safeParse(message).success).toBe(true);
     expect(schema.safeParse(message).success).toBe(true);
   });
 
-  it.each([lobbyCreate, lobbyJoin, lobbyCancel, gameMove])(
+  it("accepts a casual game with no clock", () => {
+    const casual = { ...lobbyCreate, rated: false, timeControl: untimedControl };
+    expect(WsClientMessageSchema.safeParse(casual).success).toBe(true);
+    expect(WsLobbyCreateMessageSchema.safeParse(casual).success).toBe(true);
+  });
+
+  it("refuses a rated game with no clock through the message's own schema too", () => {
+    expect(
+      WsLobbyCreateMessageSchema.safeParse({ ...lobbyCreate, timeControl: untimedControl }).success,
+    ).toBe(false);
+  });
+
+  it.each([lobbyCreate, lobbyJoin, lobbyCancel, gameReady, gameDecline, gameMove])(
     "rejects extra properties on %o",
     (message) => {
       expect(WsClientMessageSchema.safeParse({ ...message, spoofed: true }).success).toBe(false);
@@ -107,8 +159,12 @@ describe("WsClientMessageSchema", () => {
   it.each([
     ["an unknown type", { type: "lobby.destroy", requestId: REQUEST_ID }],
     ["a missing type", { requestId: REQUEST_ID }],
-    ["a missing request ID", { type: "lobby.create" }],
-    ["a non-UUID request ID", { type: "lobby.create", requestId: "request-1" }],
+    ["a missing request ID", { type: "lobby.create", rated: true }],
+    ["a missing rated flag", { type: "lobby.create", requestId: REQUEST_ID }],
+    ["a missing seat", { ...lobbyCreate, creatorSeat: undefined }],
+    ["a seat that is not one of the two", { ...lobbyCreate, creatorSeat: 3 }],
+    ["a non-UUID request ID", { type: "lobby.create", requestId: "request-1", rated: true }],
+    ["a rated game with no clock", { ...lobbyCreate, timeControl: untimedControl }],
     ["a non-UUID game ID", { type: "lobby.join", requestId: REQUEST_ID, gameId: "game-1" }],
     ["a missing game ID", { type: "lobby.cancel", requestId: REQUEST_ID }],
     ["a null body", null],
@@ -135,6 +191,18 @@ describe("WsClientMessageSchema", () => {
     ).toBe(false);
   });
 
+  it.each([0, -1, 1.5, "1", null, undefined])(
+    "rejects a ready decision with generation %o",
+    (readyCheckGeneration) => {
+      expect(WsClientMessageSchema.safeParse({ ...gameReady, readyCheckGeneration }).success).toBe(
+        false,
+      );
+      expect(
+        WsClientMessageSchema.safeParse({ ...gameDecline, readyCheckGeneration }).success,
+      ).toBe(false);
+    },
+  );
+
   it("accepts the first revision a freshly created game has", () => {
     expect(WsClientMessageSchema.safeParse({ ...gameMove, expectedRevision: 0 }).success).toBe(
       true,
@@ -156,8 +224,18 @@ describe("WsServerMessageSchema", () => {
   };
   const lobbySnapshot = {
     type: "lobby.snapshot",
-    lobbies: [{ id: GAME_ID, playerOne: PLAYER_ONE_USER, createdAt: CREATED_AT }],
+    lobbies: [
+      {
+        id: GAME_ID,
+        owner: PLAYER_ONE_USER,
+        creatorSeat: PLAYER_TWO,
+        rated: false,
+        timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+        createdAt: CREATED_AT,
+      },
+    ],
   };
+  const sessionSynced = { type: "session.synced" };
   const gameClosed = { type: "game.closed", gameId: GAME_ID };
   const commandAccepted = { type: "command.accepted", requestId: REQUEST_ID };
   const commandRejected = {
@@ -169,6 +247,7 @@ describe("WsServerMessageSchema", () => {
 
   it.each([
     ["session.ready", sessionReady, WsSessionReadyMessageSchema],
+    ["session.synced", sessionSynced, WsSessionSyncedMessageSchema],
     ["lobby.snapshot", lobbySnapshot, WsLobbySnapshotMessageSchema],
     ["game.closed", gameClosed, WsGameClosedMessageSchema],
     ["command.accepted", commandAccepted, WsCommandAcceptedMessageSchema],
@@ -204,7 +283,16 @@ describe("WsServerMessageSchema", () => {
 
   it("rejects a session.ready announcing another protocol version", () => {
     expect(
-      WsSessionReadyMessageSchema.safeParse({ ...sessionReady, protocolVersion: 2 }).success,
+      WsSessionReadyMessageSchema.safeParse({
+        ...sessionReady,
+        protocolVersion: WS_PROTOCOL_VERSION + 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      WsSessionReadyMessageSchema.safeParse({
+        ...sessionReady,
+        protocolVersion: WS_PROTOCOL_VERSION - 1,
+      }).success,
     ).toBe(false);
   });
 
@@ -244,6 +332,12 @@ describe("WsServerMessageSchema", () => {
     ["extra properties", { ...commandRejected, stack: "Error: ..." }],
   ])("rejects command.rejected with %s", (_label, message) => {
     expect(WsCommandRejectedMessageSchema.safeParse(message).success).toBe(false);
+  });
+
+  it("rejects a session.synced carrying anything at all", () => {
+    expect(WsServerMessageSchema.safeParse({ type: "session.synced", games: [] }).success).toBe(
+      false,
+    );
   });
 
   it("rejects an unknown server message type", () => {

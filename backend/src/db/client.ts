@@ -11,11 +11,7 @@ import * as schema from "./schema.js";
 
 export type Database = PostgresJsDatabase<typeof schema>;
 
-/**
- * Whatever a query can run against: the pool itself or an open transaction.
- * Query helpers take this so the same code serves both, which is what lets a
- * read and its write share one transaction and one row lock.
- */
+/** Pool or transaction executor, allowing helpers to share locks and writes. */
 export type DatabaseExecutor = PgDatabase<PostgresJsQueryResultHKT, typeof schema>;
 
 export interface DatabaseClient {

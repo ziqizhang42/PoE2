@@ -1,11 +1,4 @@
-/**
- * TanStack Query owns authentication state, and nothing else does.
- *
- * The session query holds `null` for a confirmed signed-out browser and an
- * `AuthUser` for a signed-in one; `undefined` only ever means "not loaded yet".
- * Registration and login write the freshly confirmed user into that cache and
- * logout clears it, so every consumer observes one value.
- */
+/** Sole owner of session state: `null` is signed out; `undefined` is unresolved. */
 
 import type { AuthUser, LoginRequest, RegisterRequest } from "@poe2/protocol";
 import {

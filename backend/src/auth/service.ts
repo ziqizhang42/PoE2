@@ -1,10 +1,14 @@
-import type { AuthUser, LoginRequest, RegisterRequest } from "@poe2/protocol";
+import {
+  normalizeUsername,
+  type AuthUser,
+  type LoginRequest,
+  type RegisterRequest,
+} from "@poe2/protocol";
 
 import { isKdfCapacityError } from "./kdf-executor.js";
 import type { PasswordHasher } from "./password.js";
 import type { AuthRepository } from "./repository.js";
 import { generateSessionToken, hashSessionToken } from "./session-token.js";
-import { normalizeUsername } from "./username.js";
 
 const DEFAULT_SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1_000;
 
@@ -53,7 +57,6 @@ const TEMPORARILY_UNAVAILABLE: TemporarilyUnavailableResult = {
   code: "temporarily_unavailable",
 };
 
-/** Either the KDF result, or a marker that capacity was exhausted. */
 type KdfOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
 
 /**
@@ -97,14 +100,8 @@ export function createAuthService(
   }
 
   /**
-   * Replaces an accepted-but-outdated hash with a current-policy one. Every
-   * failure here — including another request having already upgraded the same
-   * row — leaves the caller logged in with a hash that still verifies.
-   *
-   * Awaited rather than detached: a floating promise would be an unhandled
-   * rejection risk and would make the upgrade untestable. The cost is that a
-   * login during a policy migration spends two KDF slots in sequence, verify
-   * then rehash, which the capacity bound absorbs by shedding load.
+   * Best-effort but awaited: failures are reported without failing login, while
+   * awaiting avoids a floating rejection and keeps the second KDF operation bounded.
    */
   async function upgradePasswordHash(
     userId: string,
@@ -125,16 +122,7 @@ export function createAuthService(
     }
   }
 
-  /**
-   * Refuses a login only after spending one current-policy derivation, so no
-   * rejection path is measurably cheaper than any other and response time does
-   * not say which usernames exist.
-   *
-   * This bounds the difference rather than erasing it. A wrong password against
-   * a hash stored under an older, cheaper policy still costs that cheaper
-   * verification on top, so it ends up slightly slower than the others - the
-   * safe direction, and the gap closes as logins migrate hashes forward.
-   */
+  /** Every rejection spends at least one current-policy derivation. */
   async function rejectAfterCurrentPolicyWork(password: string): Promise<LoginResult> {
     const work = await withKdfCapacity(() => hasher.hash(password));
 
@@ -186,8 +174,6 @@ export function createAuthService(
       }
 
       if (verification.value.outcome === "unusable_hash") {
-        // The row is corrupt or tampered, so this account cannot log in at all
-        // until someone notices.
         onRecoveredError(
           new Error(`stored password hash for user ${storedUser.id} could not be parsed`),
         );
@@ -197,9 +183,7 @@ export function createAuthService(
       }
 
       if (verification.value.outcome === "mismatch") {
-        // A hash stored under an older, cheaper policy has just cost less than
-        // a current-policy one would, which on its own would make "this account
-        // exists but is not yet migrated" the fastest answer of all.
+        // Top up mismatches checked under an older, cheaper policy.
         return verification.value.storedPolicyIsCurrent
           ? { ok: false, code: "invalid_credentials" }
           : rejectAfterCurrentPolicyWork(request.password);

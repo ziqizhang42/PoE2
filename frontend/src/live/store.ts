@@ -1,9 +1,4 @@
-/**
- * Live connection, lobby, and game state.
- *
- * It holds only what the server pushed. No rule is evaluated here: a snapshot
- * is copied in as it arrived, and authentication state stays in TanStack Query.
- */
+/** Stores server-pushed live state; rules and authentication remain elsewhere. */
 
 import type { GameSnapshot, LobbyEntry, WsErrorCode } from "@poe2/protocol";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -28,6 +23,9 @@ export interface LiveState {
   readonly userId: string | null;
   readonly lobbies: readonly LobbyEntry[];
   readonly games: readonly GameSnapshot[];
+  readonly gameReceivedAtMs: Readonly<Record<string, number>>;
+  /** Until true, an absent game may still be in the opening sequence. */
+  readonly synced: boolean;
   /** Only rejections that could not be handed back to a caller land here. */
   readonly lastRejection: LiveRejection | null;
   readonly reconnectAttempts: number;
@@ -40,6 +38,8 @@ export const INITIAL_LIVE_STATE: LiveState = {
   userId: null,
   lobbies: [],
   games: [],
+  gameReceivedAtMs: {},
+  synced: false,
   lastRejection: null,
   reconnectAttempts: 0,
 };
@@ -70,4 +70,15 @@ export function removeGame(
 ): readonly GameSnapshot[] {
   const next = games.filter((game) => game.id !== gameId);
   return next.length === games.length ? games : next;
+}
+
+export function removeGameReceiptTime(
+  receivedAt: Readonly<Record<string, number>>,
+  gameId: string,
+): Readonly<Record<string, number>> {
+  if (receivedAt[gameId] === undefined) {
+    return receivedAt;
+  }
+
+  return Object.fromEntries(Object.entries(receivedAt).filter(([id]) => id !== gameId));
 }

@@ -72,6 +72,9 @@ importers:
       '@poe2/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
+      '@poe2/rules':
+        specifier: workspace:*
+        version: link:../packages/rules
       '@tanstack/react-query':
         specifier: 5.101.4
         version: 5.101.4(react@19.2.8)

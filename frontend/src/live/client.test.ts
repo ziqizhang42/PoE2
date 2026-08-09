@@ -1,7 +1,10 @@
-import type { WsServerMessage } from "@poe2/protocol";
+import { WS_PROTOCOL_VERSION, type WsServerMessage } from "@poe2/protocol";
+import { PLAYER_ONE, PLAYER_TWO } from "@poe2/rules";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createFakeClock,
+  finishedGame,
   GAME_ID,
   lobbyEntry,
   OTHER_GAME_ID,
@@ -9,8 +12,9 @@ import {
   USER_ONE,
   USER_TWO,
   waitingGame,
+  type FakeClock,
+  type FakeTimer,
 } from "../test/fakes.ts";
-import type { LiveClock } from "./clock.ts";
 import {
   createLiveClient,
   parseServerMessage,
@@ -23,6 +27,7 @@ import type { LiveSocketFactory, LiveSocketHandlers } from "./socket.ts";
 const SOCKET_URL = "ws://localhost:5173/api/ws";
 const ABNORMAL_CLOSURE = 1006;
 const POLICY_VIOLATION = 1008;
+const PROTOCOL_ERROR = 1002;
 
 /** Deterministic, schema-valid request IDs so correlation can be asserted. */
 function requestId(index: number): string {
@@ -36,15 +41,9 @@ interface FakeSocket {
   closed: { code: number; reason: string } | null;
 }
 
-interface FakeTimer {
-  readonly callback: () => void;
-  readonly delayMs: number;
-  cancelled: boolean;
-  fired: boolean;
-}
-
 interface Harness {
   readonly client: LiveClient;
+  readonly clock: FakeClock;
   readonly sockets: FakeSocket[];
   readonly timers: FakeTimer[];
   readonly suspect: () => void;
@@ -58,7 +57,7 @@ interface Harness {
 
 function createHarness(overrides: LiveClientOptions = {}): Harness {
   const sockets: FakeSocket[] = [];
-  const timers: FakeTimer[] = [];
+  const clock = createFakeClock();
   const suspect = vi.fn<() => void>();
   let nextRequestId = 0;
 
@@ -79,16 +78,6 @@ function createHarness(overrides: LiveClientOptions = {}): Harness {
     };
   };
 
-  const clock: LiveClock = {
-    schedule(callback, delayMs) {
-      const timer: FakeTimer = { callback, delayMs, cancelled: false, fired: false };
-      timers.push(timer);
-      return () => {
-        timer.cancelled = true;
-      };
-    },
-  };
-
   const client = createLiveClient({
     createSocket,
     clock,
@@ -107,13 +96,11 @@ function createHarness(overrides: LiveClientOptions = {}): Harness {
     return socket;
   };
 
-  const pendingTimers = (): FakeTimer[] =>
-    timers.filter((timer) => !timer.cancelled && !timer.fired);
-
   return {
     client,
+    clock,
     sockets,
-    timers,
+    timers: clock.timers,
     suspect,
     socket: socketAt,
     deliver(message, index) {
@@ -124,13 +111,8 @@ function createHarness(overrides: LiveClientOptions = {}): Harness {
     close(code, index) {
       socketAt(index).handlers.onClose(code);
     },
-    pendingTimers,
-    fireTimers() {
-      for (const timer of pendingTimers()) {
-        timer.fired = true;
-        timer.callback();
-      }
-    },
+    pendingTimers: clock.pending,
+    fireTimers: clock.fire,
     sent: (index) => socketAt(index).sent.map((payload) => JSON.parse(payload) as unknown),
   };
 }
@@ -140,6 +122,7 @@ function connected(overrides: LiveClientOptions = {}): Harness {
   const harness = createHarness(overrides);
   harness.client.start(USER_ONE.id);
   harness.deliver(sessionReady());
+  harness.deliver({ type: "session.synced" });
   return harness;
 }
 
@@ -154,7 +137,7 @@ describe("connection lifecycle", () => {
     expect(harness.client.store.getState().userId).toBe(USER_ONE.id);
   });
 
-  it("becomes ready only when the server has confirmed the session", () => {
+  it("becomes ready only once the server has finished the opening sync", () => {
     const harness = createHarness();
     harness.client.start(USER_ONE.id);
 
@@ -162,7 +145,75 @@ describe("connection lifecycle", () => {
 
     harness.deliver(sessionReady());
 
+    expect(harness.client.store.getState()).toMatchObject({
+      status: "connecting",
+      userId: USER_ONE.id,
+      synced: false,
+    });
+
+    harness.deliver({ type: "session.synced" });
+
     expect(harness.client.store.getState().status).toBe("ready");
+  });
+
+  it("is not synced until the server says the opening state is complete", () => {
+    const harness = createHarness();
+    harness.client.start(USER_ONE.id);
+    harness.deliver(sessionReady());
+
+    // `session.ready` precedes the reads that produce the opening snapshots, so
+    // on its own it rules nothing out.
+    expect(harness.client.store.getState().synced).toBe(false);
+
+    harness.deliver({ type: "lobby.snapshot", lobbies: [] });
+    expect(harness.client.store.getState().synced).toBe(false);
+
+    harness.deliver({ type: "session.synced" });
+    expect(harness.client.store.getState().synced).toBe(true);
+  });
+
+  it("fails closed when session.ready advertises another protocol version", async () => {
+    const harness = createHarness();
+    harness.client.start(USER_ONE.id);
+    harness.deliver(
+      JSON.stringify({
+        type: "session.ready",
+        protocolVersion: WS_PROTOCOL_VERSION + 1,
+        user: USER_ONE,
+      }),
+    );
+
+    expect(harness.client.store.getState()).toMatchObject({
+      status: "disconnected",
+      synced: false,
+    });
+    expect(harness.socket().closed).toEqual({
+      code: PROTOCOL_ERROR,
+      reason: "server protocol did not match",
+    });
+    expect(harness.pendingTimers()).toEqual([]);
+
+    // Callbacks from the abandoned generation cannot revive it.
+    harness.deliver({ type: "session.synced" });
+    expect(harness.client.store.getState().status).toBe("disconnected");
+    await expect(harness.client.createLobby(false)).resolves.toMatchObject({
+      ok: false,
+      failure: "not_connected",
+    });
+  });
+
+  it("stops being synced when a reconnect replays the opening sequence", () => {
+    const harness = connected();
+    expect(harness.client.store.getState().synced).toBe(true);
+
+    harness.close(ABNORMAL_CLOSURE);
+    harness.fireTimers();
+    harness.deliver(sessionReady());
+
+    expect(harness.client.store.getState()).toMatchObject({
+      status: "reconnecting",
+      synced: false,
+    });
   });
 
   it("does not open a second socket for a user it is already serving", () => {
@@ -239,6 +290,7 @@ describe("server messages", () => {
 
   it("upserts a game snapshot by id", () => {
     const harness = connected();
+    harness.clock.advance(1_250);
     harness.deliver({ type: "game.snapshot", game: waitingGame() });
     harness.deliver({ type: "game.snapshot", game: waitingGame(OTHER_GAME_ID) });
     harness.deliver({ type: "game.snapshot", game: { ...waitingGame(), revision: 0 } });
@@ -247,6 +299,17 @@ describe("server messages", () => {
       GAME_ID,
       OTHER_GAME_ID,
     ]);
+    expect(harness.client.store.getState().gameReceivedAtMs[GAME_ID]).toBe(1_250);
+  });
+
+  it("reports a finished snapshot so the current user's history can be invalidated", () => {
+    const onGameHistoryStale = vi.fn<(userId: string) => void>();
+    const harness = connected({ onGameHistoryStale });
+
+    harness.deliver({ type: "game.snapshot", game: finishedGame() });
+
+    expect(onGameHistoryStale).toHaveBeenCalledTimes(1);
+    expect(onGameHistoryStale).toHaveBeenCalledWith(USER_ONE.id);
   });
 
   it("drops a game the server closed", () => {
@@ -255,6 +318,7 @@ describe("server messages", () => {
     harness.deliver({ type: "game.closed", gameId: GAME_ID });
 
     expect(harness.client.store.getState().games).toEqual([]);
+    expect(harness.client.store.getState().gameReceivedAtMs[GAME_ID]).toBeUndefined();
   });
 
   it("replaces everything the previous socket held once a reconnect is confirmed", () => {
@@ -266,7 +330,26 @@ describe("server messages", () => {
     harness.deliver(sessionReady());
 
     expect(harness.client.store.getState().games).toEqual([]);
+    expect(harness.client.store.getState().synced).toBe(false);
+    expect(harness.client.store.getState().status).toBe("reconnecting");
+
+    harness.deliver({ type: "session.synced" });
+
     expect(harness.client.store.getState().status).toBe("ready");
+  });
+
+  it("refreshes history after reconnect sync because finished games are not replayed", () => {
+    const onGameHistoryStale = vi.fn<(userId: string) => void>();
+    const harness = connected({ onGameHistoryStale });
+    expect(onGameHistoryStale).not.toHaveBeenCalled();
+
+    harness.close(ABNORMAL_CLOSURE);
+    harness.fireTimers();
+    harness.deliver(sessionReady());
+    harness.deliver({ type: "session.synced" });
+
+    expect(onGameHistoryStale).toHaveBeenCalledTimes(1);
+    expect(onGameHistoryStale).toHaveBeenCalledWith(USER_ONE.id);
   });
 
   it.each([
@@ -274,14 +357,22 @@ describe("server messages", () => {
     ["an unknown type", JSON.stringify({ type: "lobby.exploded" })],
     ["a snapshot that fails the schema", JSON.stringify({ type: "lobby.snapshot", lobbies: 7 })],
     ["a non-object body", JSON.stringify([1, 2, 3])],
-  ])("ignores %s without disturbing the connection", (_label, payload) => {
+  ])("fails closed on %s", (_label, payload) => {
     const harness = connected();
     harness.deliver({ type: "lobby.snapshot", lobbies: [lobbyEntry()] });
 
     harness.deliver(payload);
 
-    expect(harness.client.store.getState().lobbies).toEqual([lobbyEntry()]);
-    expect(harness.client.store.getState().status).toBe("ready");
+    expect(harness.client.store.getState()).toMatchObject({
+      lobbies: [],
+      status: "disconnected",
+      synced: false,
+    });
+    expect(harness.socket().closed).toEqual({
+      code: PROTOCOL_ERROR,
+      reason: "server protocol did not match",
+    });
+    expect(harness.pendingTimers()).toEqual([]);
   });
 });
 
@@ -289,7 +380,7 @@ describe("commands", () => {
   it("sends every supported command in the shared shape", () => {
     const harness = connected();
 
-    void harness.client.createLobby();
+    void harness.client.createLobby(false);
     void harness.client.joinLobby(GAME_ID);
     void harness.client.cancelLobby(GAME_ID);
     void harness.client.playMove({
@@ -297,9 +388,16 @@ describe("commands", () => {
       expectedRevision: 4,
       square: { row: 3, col: 3 },
     });
+    void harness.client.resignGame({ gameId: GAME_ID, expectedRevision: 5 });
 
     expect(harness.sent()).toEqual([
-      { type: "lobby.create", requestId: requestId(0) },
+      {
+        type: "lobby.create",
+        requestId: requestId(0),
+        rated: false,
+        timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+        creatorSeat: PLAYER_ONE,
+      },
       { type: "lobby.join", requestId: requestId(1), gameId: GAME_ID },
       { type: "lobby.cancel", requestId: requestId(2), gameId: GAME_ID },
       {
@@ -309,12 +407,33 @@ describe("commands", () => {
         expectedRevision: 4,
         square: { row: 3, col: 3 },
       },
+      { type: "game.resign", requestId: requestId(4), gameId: GAME_ID, expectedRevision: 5 },
+    ]);
+  });
+
+  it("carries the chosen stakes, clock and seat on a created lobby", () => {
+    const harness = connected();
+
+    void harness.client.createLobby(
+      true,
+      { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+      PLAYER_TWO,
+    );
+
+    expect(harness.sent()).toEqual([
+      {
+        type: "lobby.create",
+        requestId: requestId(0),
+        rated: true,
+        timeControl: { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+        creatorSeat: PLAYER_TWO,
+      },
     ]);
   });
 
   it("settles a command with the acceptance that echoes its request ID", async () => {
     const harness = connected();
-    const result = harness.client.createLobby();
+    const result = harness.client.createLobby(false);
 
     harness.deliver({ type: "command.accepted", requestId: requestId(0) });
 
@@ -323,7 +442,7 @@ describe("commands", () => {
 
   it("settles the right command when several are outstanding", async () => {
     const harness = connected();
-    const first = harness.client.createLobby();
+    const first = harness.client.createLobby(false);
     const second = harness.client.joinLobby(GAME_ID);
 
     harness.deliver({
@@ -362,11 +481,12 @@ describe("commands", () => {
     });
   });
 
-  it("refuses a command while the connection is not ready", async () => {
+  it("refuses a command while the opening state is not synced", async () => {
     const harness = createHarness();
     harness.client.start(USER_ONE.id);
+    harness.deliver(sessionReady());
 
-    await expect(harness.client.createLobby()).resolves.toMatchObject({
+    await expect(harness.client.createLobby(false)).resolves.toMatchObject({
       ok: false,
       failure: "not_connected",
     });
@@ -375,7 +495,7 @@ describe("commands", () => {
 
   it("settles every outstanding command when the connection drops", async () => {
     const harness = connected();
-    const pending = harness.client.createLobby();
+    const pending = harness.client.createLobby(false);
 
     harness.close(ABNORMAL_CLOSURE);
 
@@ -388,7 +508,7 @@ describe("commands", () => {
 
   it("settles a command the server never answers", async () => {
     const harness = connected();
-    const pending = harness.client.createLobby();
+    const pending = harness.client.createLobby(false);
 
     harness.fireTimers();
 
@@ -397,7 +517,7 @@ describe("commands", () => {
 
   it("settles outstanding commands when the user signs out", async () => {
     const harness = connected();
-    const pending = harness.client.createLobby();
+    const pending = harness.client.createLobby(false);
 
     harness.client.stop();
 
@@ -428,16 +548,32 @@ describe("reconnection", () => {
     expect(harness.pendingTimers()[0]?.delayMs).toBe(1500);
   });
 
-  it("resets the backoff once a session is confirmed again", () => {
+  it("keeps increasing backoff until opening synchronization succeeds", () => {
     const harness = connected();
 
     harness.close(ABNORMAL_CLOSURE);
-    harness.fireTimers();
-    harness.close(ABNORMAL_CLOSURE);
+    expect(harness.pendingTimers()[0]?.delayMs).toBe(375);
     harness.fireTimers();
     harness.deliver(sessionReady());
 
-    expect(harness.client.store.getState().reconnectAttempts).toBe(0);
+    expect(harness.client.store.getState()).toMatchObject({
+      status: "reconnecting",
+      reconnectAttempts: 1,
+    });
+
+    harness.close(ABNORMAL_CLOSURE);
+    expect(harness.pendingTimers()[0]?.delayMs).toBe(750);
+    harness.fireTimers();
+    harness.deliver(sessionReady());
+
+    expect(harness.client.store.getState().reconnectAttempts).toBe(2);
+
+    harness.deliver({ type: "session.synced" });
+
+    expect(harness.client.store.getState()).toMatchObject({
+      status: "ready",
+      reconnectAttempts: 0,
+    });
 
     harness.close(ABNORMAL_CLOSURE);
 
@@ -454,7 +590,9 @@ describe("reconnection", () => {
   });
 
   it("does not treat an established connection dropping as a session problem", () => {
-    const harness = connected();
+    const harness = createHarness();
+    harness.client.start(USER_ONE.id);
+    harness.deliver(sessionReady());
 
     harness.close(ABNORMAL_CLOSURE);
 
@@ -512,10 +650,16 @@ describe("parseServerMessage", () => {
     expect(parseServerMessage(JSON.stringify(sessionReady()))).toEqual(sessionReady());
   });
 
-  it.each(["", "{", JSON.stringify({ type: "session.ready", protocolVersion: 2, user: USER_ONE })])(
-    "returns null for %s",
-    (payload) => {
-      expect(parseServerMessage(payload)).toBeNull();
-    },
-  );
+  it.each([
+    "",
+    "{",
+    // A version this client was not built against is rejected rather than guessed at.
+    JSON.stringify({
+      type: "session.ready",
+      protocolVersion: WS_PROTOCOL_VERSION + 1,
+      user: USER_ONE,
+    }),
+  ])("returns null for %s", (payload) => {
+    expect(parseServerMessage(payload)).toBeNull();
+  });
 });

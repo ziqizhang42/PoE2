@@ -4,6 +4,8 @@ import {
   CELL_COUNT,
   createEmptyBoard,
   gameResult,
+  PLAYER_ONE,
+  PLAYER_TWO,
   replay,
   scoreBoard,
   sideToMove,
@@ -20,9 +22,15 @@ import {
   GameResultSchema,
   GameSnapshotSchema,
   LobbyEntrySchema,
+  ReadyCheckGameSnapshotSchema,
   PlayerSchema,
   ScoreByPlayerSchema,
   SquareSchema,
+  MAX_INCREMENT_MS,
+  MAX_INITIAL_MS,
+  MIN_INITIAL_MS,
+  TimeControlSchema,
+  timedControl,
   WaitingGameSnapshotSchema,
 } from "./game.js";
 
@@ -31,18 +39,24 @@ const PLAYER_TWO_USER = { id: "1b5d1bfe-2d8c-4a0e-9d34-9ff5f2f0c8d3", username: 
 const GAME_ID = "6f1f4a52-3d6a-4a37-8f0d-1f1a0bb6b6c1";
 const CREATED_AT = "2026-08-04T10:00:00.000Z";
 const UPDATED_AT = "2026-08-04T10:05:00.000Z";
+const UNTIMED = { kind: "untimed", initialMs: null, incrementMs: null };
 
 function waitingSnapshot(): unknown {
   return {
     id: GAME_ID,
     revision: 0,
+    rated: false,
+    timeControl: UNTIMED,
     status: "waiting",
     players: { playerOne: PLAYER_ONE_USER, playerTwo: null },
+    creatorSeat: PLAYER_ONE,
     board: createEmptyBoard(),
     moves: [],
     scores: { playerOne: 0, playerTwo: 0 },
     sideToMove: null,
-    result: null,
+    outcome: null,
+    clock: null,
+    readyCheck: null,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
   };
@@ -65,17 +79,23 @@ function activeSnapshot(moveCount = 3): unknown {
   return {
     id: GAME_ID,
     revision: moveCount + 1,
+    rated: false,
+    timeControl: UNTIMED,
     status: "active",
     players: { playerOne: PLAYER_ONE_USER, playerTwo: PLAYER_TWO_USER },
     board: game.board,
     moves: game.moves,
     scores: scoreBoard(game.board),
     sideToMove: sideToMove(game),
-    result: null,
+    outcome: null,
+    clock: null,
+    readyCheck: null,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
   };
 }
+
+const FINISHED_AT = "2026-08-04T10:30:00.000Z";
 
 function finishedSnapshot(): unknown {
   const game = playedGame(CELL_COUNT);
@@ -83,13 +103,21 @@ function finishedSnapshot(): unknown {
   return {
     id: GAME_ID,
     revision: CELL_COUNT + 1,
+    rated: true,
+    timeControl: UNTIMED,
     status: "finished",
     players: { playerOne: PLAYER_ONE_USER, playerTwo: PLAYER_TWO_USER },
     board: game.board,
     moves: game.moves,
     scores: scoreBoard(game.board),
     sideToMove: null,
-    result: gameResult(game),
+    outcome: {
+      reason: "board_full",
+      winner: gameResult(game)?.winner,
+      finishedAt: FINISHED_AT,
+    },
+    clock: null,
+    readyCheck: null,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
   };
@@ -200,29 +228,166 @@ describe("GameResultSchema", () => {
 });
 
 describe("LobbyEntrySchema", () => {
+  const entry = {
+    id: GAME_ID,
+    owner: PLAYER_ONE_USER,
+    creatorSeat: PLAYER_ONE,
+    rated: false,
+    timeControl: UNTIMED,
+    createdAt: CREATED_AT,
+  };
+
   it("accepts a waiting lobby entry", () => {
-    expect(
-      LobbyEntrySchema.safeParse({
-        id: GAME_ID,
-        playerOne: PLAYER_ONE_USER,
-        createdAt: CREATED_AT,
-      }).success,
-    ).toBe(true);
+    expect(LobbyEntrySchema.safeParse(entry).success).toBe(true);
+    expect(LobbyEntrySchema.safeParse({ ...entry, rated: true }).success).toBe(true);
+  });
+
+  it("accepts a lobby whose owner took the second seat", () => {
+    expect(LobbyEntrySchema.safeParse({ ...entry, creatorSeat: PLAYER_TWO }).success).toBe(true);
   });
 
   it.each([
-    { id: "not-a-uuid", playerOne: PLAYER_ONE_USER, createdAt: CREATED_AT },
-    { id: GAME_ID, playerOne: PLAYER_ONE_USER, createdAt: "yesterday" },
-    { id: GAME_ID, playerOne: { id: PLAYER_ONE_USER.id }, createdAt: CREATED_AT },
-    { id: GAME_ID, playerOne: PLAYER_ONE_USER, createdAt: CREATED_AT, private: true },
-  ])("rejects %o", (entry) => {
-    expect(LobbyEntrySchema.safeParse(entry).success).toBe(false);
+    ["a non-UUID id", { ...entry, id: "not-a-uuid" }],
+    ["an unparseable timestamp", { ...entry, createdAt: "yesterday" }],
+    ["a partial player", { ...entry, owner: { id: PLAYER_ONE_USER.id } }],
+    ["no seat for the owner", { ...entry, creatorSeat: undefined }],
+    ["a seat that is not one of the two", { ...entry, creatorSeat: 0 }],
+    ["an extra property", { ...entry, private: true }],
+    ["no rated flag", { id: GAME_ID, owner: PLAYER_ONE_USER, createdAt: CREATED_AT }],
+    ["a non-boolean rated flag", { ...entry, rated: "yes" }],
+  ])("rejects %s", (_label, invalid) => {
+    expect(LobbyEntrySchema.safeParse(invalid).success).toBe(false);
   });
 });
 
+describe("time controls", () => {
+  it("accepts an untimed control", () => {
+    expect(TimeControlSchema.safeParse(UNTIMED).success).toBe(true);
+  });
+
+  it.each([
+    ["the shortest clock", MIN_INITIAL_MS, 0],
+    ["the longest clock", MAX_INITIAL_MS, MAX_INCREMENT_MS],
+    ["an ordinary one nobody preset", 137_000, 7_000],
+  ])("accepts %s", (_label, initialMs, incrementMs) => {
+    expect(TimeControlSchema.safeParse({ kind: "timed", initialMs, incrementMs }).success).toBe(
+      true,
+    );
+  });
+
+  it("accepts a timed control with no increment", () => {
+    expect(timedControl(60_000, 0)).toEqual({ kind: "timed", initialMs: 60_000, incrementMs: 0 });
+  });
+
+  it.each([
+    [
+      "a clock below the floor",
+      { kind: "timed", initialMs: MIN_INITIAL_MS - 1_000, incrementMs: 0 },
+    ],
+    [
+      "a clock above the ceiling",
+      { kind: "timed", initialMs: MAX_INITIAL_MS + 1_000, incrementMs: 0 },
+    ],
+    [
+      "an increment above the ceiling",
+      { kind: "timed", initialMs: 60_000, incrementMs: MAX_INCREMENT_MS + 1_000 },
+    ],
+    ["a negative increment", { kind: "timed", initialMs: 60_000, incrementMs: -1_000 }],
+    ["a fraction of a second", { kind: "timed", initialMs: 60_500, incrementMs: 0 }],
+    [
+      "a fraction of a second of increment",
+      { kind: "timed", initialMs: 60_000, incrementMs: 1_500 },
+    ],
+    ["durations on an untimed control", { kind: "untimed", initialMs: 60_000, incrementMs: null }],
+    ["half a control", { kind: "timed", initialMs: 60_000, incrementMs: null }],
+    [
+      "a preset name where a kind belongs",
+      { kind: "5m_3s", initialMs: 300_000, incrementMs: 3_000 },
+    ],
+  ])("rejects %s", (_label, control) => {
+    expect(TimeControlSchema.safeParse(control).success).toBe(false);
+  });
+
+  it.each([
+    [MIN_INITIAL_MS - 1_000, 0],
+    [60_500, 0],
+    [60_000, MAX_INCREMENT_MS + 1_000],
+  ])("returns null from timedControl for %d + %d", (initialMs, incrementMs) => {
+    expect(timedControl(initialMs, incrementMs)).toBeNull();
+  });
+});
+
+function readyCheckSnapshot(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    id: GAME_ID,
+    revision: 1,
+    rated: false,
+    timeControl: UNTIMED,
+    status: "ready_check",
+    players: { playerOne: PLAYER_ONE_USER, playerTwo: PLAYER_TWO_USER },
+    board: createEmptyBoard(),
+    moves: [],
+    scores: { playerOne: 0, playerTwo: 0 },
+    sideToMove: null,
+    outcome: null,
+    clock: null,
+    readyCheck: {
+      generation: 1,
+      playerOneReady: false,
+      playerTwoReady: false,
+      deadline: "2026-08-04T10:06:00.000Z",
+      serverNow: UPDATED_AT,
+    },
+    createdAt: CREATED_AT,
+    updatedAt: UPDATED_AT,
+    ...overrides,
+  };
+}
+
 describe("GameSnapshotSchema", () => {
+  it("accepts a ready check with two seats and nothing started", () => {
+    expect(GameSnapshotSchema.safeParse(readyCheckSnapshot()).success).toBe(true);
+    expect(ReadyCheckGameSnapshotSchema.safeParse(readyCheckSnapshot()).success).toBe(true);
+  });
+
+  it("rejects a check both players have confirmed", () => {
+    expect(
+      GameSnapshotSchema.safeParse(
+        readyCheckSnapshot({
+          readyCheck: {
+            generation: 1,
+            playerOneReady: true,
+            playerTwoReady: true,
+            deadline: "2026-08-04T10:06:00.000Z",
+            serverNow: UPDATED_AT,
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["a second seat", { players: { playerOne: PLAYER_ONE_USER, playerTwo: null } }],
+    ["moves it cannot have played", { moves: [{ row: 0, col: 0 }] }],
+    ["a side to move", { sideToMove: 1 }],
+    [
+      "a running clock",
+      {
+        clock: {
+          remainingMs: { playerOne: 1_000, playerTwo: 1_000 },
+          runningPlayer: 1,
+          turnStartedAt: CREATED_AT,
+          deadline: UPDATED_AT,
+          serverNow: UPDATED_AT,
+        },
+      },
+    ],
+  ])("rejects a ready check with %s", (_label, overrides) => {
+    expect(GameSnapshotSchema.safeParse(readyCheckSnapshot(overrides)).success).toBe(false);
+  });
+
   it("names every status the union covers", () => {
-    expect(GAME_STATUSES).toEqual(["waiting", "active", "finished"]);
+    expect(GAME_STATUSES).toEqual(["waiting", "ready_check", "active", "finished"]);
   });
 
   it("accepts a waiting snapshot", () => {
@@ -240,14 +405,62 @@ describe("GameSnapshotSchema", () => {
     expect(FinishedGameSnapshotSchema.safeParse(finishedSnapshot()).success).toBe(true);
   });
 
+  it("accepts a timed active snapshot whose running balance matches server time", () => {
+    expect(
+      GameSnapshotSchema.safeParse({
+        ...(activeSnapshot() as object),
+        timeControl: { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+        clock: {
+          remainingMs: { playerOne: 60_000, playerTwo: 280_000 },
+          runningPlayer: 1,
+          turnStartedAt: CREATED_AT,
+          deadline: "2026-08-04T10:06:00.000Z",
+          serverNow: UPDATED_AT,
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a timed active snapshot whose displayed balance disagrees with its deadline", () => {
+    expect(
+      GameSnapshotSchema.safeParse({
+        ...(activeSnapshot() as object),
+        timeControl: { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+        clock: {
+          remainingMs: { playerOne: 59_999, playerTwo: 280_000 },
+          runningPlayer: 1,
+          turnStartedAt: CREATED_AT,
+          deadline: "2026-08-04T10:06:00.000Z",
+          serverNow: UPDATED_AT,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires the timed-out player's final balance to be zero", () => {
+    const timedOut = {
+      ...(finishedSnapshot() as object),
+      timeControl: { kind: "timed", initialMs: 180_000, incrementMs: 2_000 },
+      outcome: { reason: "timeout", winner: 1, finishedAt: FINISHED_AT },
+      clock: {
+        remainingMs: { playerOne: 12_000, playerTwo: 0 },
+        stoppedAt: FINISHED_AT,
+      },
+    };
+
+    expect(GameSnapshotSchema.safeParse(timedOut).success).toBe(true);
+    expect(
+      GameSnapshotSchema.safeParse({
+        ...timedOut,
+        clock: { ...timedOut.clock, remainingMs: { playerOne: 12_000, playerTwo: 1 } },
+      }).success,
+    ).toBe(false);
+  });
+
   it.each([
     ["a second player", "players", { playerOne: PLAYER_ONE_USER, playerTwo: PLAYER_TWO_USER }],
     ["a side to move", "sideToMove", 1],
-    [
-      "a result",
-      "result",
-      { scores: { playerOne: 0, playerTwo: 0 }, winner: 2, marginHalfPoints: -11 },
-    ],
+    ["an outcome", "outcome", { reason: "resignation", winner: 2, finishedAt: FINISHED_AT }],
     ["played moves", "moves", [{ row: 0, col: 0 }]],
   ])("rejects a waiting snapshot with %s", (_label, field, value) => {
     expect(GameSnapshotSchema.safeParse(withField(waitingSnapshot(), field, value)).success).toBe(
@@ -258,11 +471,7 @@ describe("GameSnapshotSchema", () => {
   it.each([
     ["no second player", "players", { playerOne: PLAYER_ONE_USER, playerTwo: null }],
     ["no side to move", "sideToMove", null],
-    [
-      "a result",
-      "result",
-      { scores: { playerOne: 0, playerTwo: 0 }, winner: 2, marginHalfPoints: -11 },
-    ],
+    ["an outcome", "outcome", { reason: "resignation", winner: 2, finishedAt: FINISHED_AT }],
   ])("rejects an active snapshot with %s", (_label, field, value) => {
     expect(GameSnapshotSchema.safeParse(withField(activeSnapshot(), field, value)).success).toBe(
       false,
@@ -270,9 +479,20 @@ describe("GameSnapshotSchema", () => {
   });
 
   it.each([
-    ["no result", "result", null],
+    ["no outcome", "outcome", null],
     ["a side to move", "sideToMove", 1],
     ["no second player", "players", { playerOne: PLAYER_ONE_USER, playerTwo: null }],
+    [
+      "an unknown outcome reason",
+      "outcome",
+      { reason: "abandoned", winner: 1, finishedAt: FINISHED_AT },
+    ],
+    ["an outcome with no winner", "outcome", { reason: "board_full", finishedAt: FINISHED_AT }],
+    [
+      "an outcome carrying a margin, which is derived rather than sent",
+      "outcome",
+      { reason: "board_full", winner: 1, finishedAt: FINISHED_AT, marginHalfPoints: 1 },
+    ],
   ])("rejects a finished snapshot with %s", (_label, field, value) => {
     expect(GameSnapshotSchema.safeParse(withField(finishedSnapshot(), field, value)).success).toBe(
       false,

@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PoE2</title>
+    <!-- Apply the stored or system theme before first paint to prevent a flash. -->
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          var saved = window.localStorage.getItem("poe2-theme");
+          stored = saved === "light" || saved === "dark" ? saved : null;
+        } catch (error) {
+          stored = null;
+        }
+        var prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = stored || (prefersDark ? "dark" : "light");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

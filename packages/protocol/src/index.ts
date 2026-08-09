@@ -10,6 +10,7 @@ export {
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
   UsernameSchema,
+  normalizeUsername,
 } from "./auth.js";
 export type {
   AuthErrorCode,
@@ -22,10 +23,18 @@ export type {
 
 export {
   ActiveGameSnapshotSchema,
+  ActiveGameClockSchema,
   BoardSchema,
   CellSchema,
   FinishedGameSnapshotSchema,
+  FinishedGameClockSchema,
+  READY_CHECK_MS,
+  ReadyCheckGameSnapshotSchema,
+  ReadyCheckSchema,
+  GAME_OUTCOME_REASONS,
   GAME_STATUSES,
+  GameOutcomeReasonSchema,
+  GameOutcomeSchema,
   GameResultSchema,
   GameSnapshotSchema,
   LobbyEntrySchema,
@@ -33,15 +42,70 @@ export {
   ScoreByPlayerSchema,
   SquareSchema,
   WaitingGameSnapshotSchema,
+  RemainingClockTimeSchema,
+  MAX_INCREMENT_MS,
+  MAX_INITIAL_MS,
+  MIN_INCREMENT_MS,
+  MIN_INITIAL_MS,
+  TIME_CONTROL_STEP_MS,
+  TimeControlSchema,
+  TimedTimeControlSchema,
+  UNTIMED,
+  timedControl,
 } from "./game.js";
 export type {
   ActiveGameSnapshot,
+  ActiveGameClock,
   FinishedGameSnapshot,
+  FinishedGameClock,
+  GameOutcome,
+  GameOutcomeReason,
   GameSnapshot,
   GameStatus,
   LobbyEntry,
+  ReadyCheck,
+  ReadyCheckGameSnapshot,
+  RemainingClockTime,
+  TimeControl,
+  TimedTimeControl,
+  UntimedTimeControl,
   WaitingGameSnapshot,
 } from "./game.js";
+
+export {
+  GameHistoryEntrySchema,
+  GameHistoryPageSchema,
+  GameReplaySchema,
+  GamesErrorResponseSchema,
+  HISTORY_PAGE_LIMIT,
+  MAX_HISTORY_PAGE_LIMIT,
+  RatingChangeSchema,
+} from "./history.js";
+export type {
+  GameHistoryEntry,
+  GameHistoryPage,
+  GameReplay,
+  GamesErrorCode,
+  GamesErrorResponse,
+  RatingChange,
+  ReplayClockHistory,
+  ReplayMoveClock,
+} from "./history.js";
+
+export {
+  MAX_RATING_HISTORY,
+  PlayerErrorResponseSchema,
+  PublicPlayerProfileSchema,
+  PublicPlayerStatisticsSchema,
+} from "./player.js";
+export type {
+  PlayerErrorCode,
+  PlayerErrorResponse,
+  PublicPlayerProfile,
+  PublicPlayerStatistics,
+  RatingPercentile,
+  RatingPoint,
+} from "./player.js";
 
 export { HealthResponseSchema } from "./health.js";
 export type { HealthResponse } from "./health.js";
@@ -54,7 +118,10 @@ export {
   WsCommandRejectedMessageSchema,
   WsErrorCodeSchema,
   WsGameClosedMessageSchema,
+  WsGameDeclineMessageSchema,
   WsGameMoveMessageSchema,
+  WsGameReadyMessageSchema,
+  WsGameResignMessageSchema,
   WsGameSnapshotMessageSchema,
   WsLobbyCancelMessageSchema,
   WsLobbyCreateMessageSchema,
@@ -62,6 +129,7 @@ export {
   WsLobbySnapshotMessageSchema,
   WsServerMessageSchema,
   WsSessionReadyMessageSchema,
+  WsSessionSyncedMessageSchema,
 } from "./websocket.js";
 export type {
   WsClientMessage,
@@ -69,7 +137,10 @@ export type {
   WsCommandRejectedMessage,
   WsErrorCode,
   WsGameClosedMessage,
+  WsGameDeclineMessage,
   WsGameMoveMessage,
+  WsGameReadyMessage,
+  WsGameResignMessage,
   WsGameSnapshotMessage,
   WsLobbyCancelMessage,
   WsLobbyCreateMessage,
@@ -77,4 +148,5 @@ export type {
   WsLobbySnapshotMessage,
   WsServerMessage,
   WsSessionReadyMessage,
+  WsSessionSyncedMessage,
 } from "./websocket.js";

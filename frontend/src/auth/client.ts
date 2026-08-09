@@ -15,18 +15,25 @@ import {
   type RegisterRequest,
 } from "@poe2/protocol";
 
+import {
+  browserFetch,
+  CREATED,
+  isAbortError,
+  NO_CONTENT,
+  OK,
+  parseRetryAfterSeconds,
+  readJson,
+  UNAUTHORIZED,
+  type FetchLike,
+} from "../http/fetch.ts";
 import { AuthRequestError, httpError, networkError, protocolError } from "./errors.ts";
 
 const SESSION_PATH = "/api/auth/session";
 const REGISTER_PATH = "/api/auth/register";
 const LOGIN_PATH = "/api/auth/login";
 
-const OK = 200;
-const CREATED = 201;
-const NO_CONTENT = 204;
-const UNAUTHORIZED = 401;
-
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type { FetchLike };
+export { parseRetryAfterSeconds };
 
 export interface AuthClient {
   /** `null` is the ordinary signed-out answer, not a failure. */
@@ -41,7 +48,7 @@ export interface AuthClientOptions {
 }
 
 export function createAuthClient(options: AuthClientOptions = {}): AuthClient {
-  const fetchImpl: FetchLike = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  const fetchImpl: FetchLike = options.fetch ?? browserFetch;
 
   const send = async (path: string, init: RequestInit): Promise<Response> => {
     try {
@@ -116,24 +123,6 @@ export function createAuthClient(options: AuthClientOptions = {}): AuthClient {
   };
 }
 
-/**
- * Only the delta-seconds form is honoured. These routes never send the
- * HTTP-date form, and guessing across clock skew would be worse than no hint.
- */
-export function parseRetryAfterSeconds(header: string | null): number | null {
-  if (header === null) {
-    return null;
-  }
-
-  const trimmed = header.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  const seconds = Number(trimmed);
-  return Number.isInteger(seconds) && seconds >= 0 ? seconds : null;
-}
-
 function jsonRequest(body: RegisterRequest | LoginRequest): RequestInit {
   return {
     method: "POST",
@@ -156,25 +145,4 @@ async function toRequestError(response: Response): Promise<AuthRequestError> {
     message: parsed.data.message,
     retryAfterSeconds,
   });
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Checked structurally: `fetch` rejects an abort with a `DOMException`, which
- * does not derive from `Error` in every environment this code is tested in.
- */
-function isAbortError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("name" in error)) {
-    return false;
-  }
-
-  const { name } = error;
-  return name === "AbortError";
 }

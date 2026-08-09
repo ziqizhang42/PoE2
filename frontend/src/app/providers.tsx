@@ -5,6 +5,8 @@ import { BrowserRouter } from "react-router";
 import { RuntimeContext, type AppRuntime } from "../runtime/context.ts";
 import { createAppRuntime } from "../runtime/create-runtime.ts";
 import { RuntimeBootstrap } from "../runtime/runtime-bootstrap.tsx";
+import { BoardMarksProvider } from "../features/board-marks/board-marks-provider.tsx";
+import { ThemeProvider } from "../theme/theme-provider.tsx";
 
 type AppProvidersProps = {
   children: ReactNode;
@@ -19,8 +21,12 @@ export function AppProviders({ children, runtime }: AppProvidersProps) {
     <BrowserRouter>
       <QueryClientProvider client={active.queryClient}>
         <RuntimeContext value={active}>
-          <RuntimeBootstrap />
-          {children}
+          <ThemeProvider>
+            <BoardMarksProvider>
+              <RuntimeBootstrap />
+              {children}
+            </BoardMarksProvider>
+          </ThemeProvider>
         </RuntimeContext>
       </QueryClientProvider>
     </BrowserRouter>

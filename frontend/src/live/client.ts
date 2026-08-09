@@ -1,22 +1,20 @@
 /**
- * The browser end of the WebSocket protocol in docs/protocol.md.
- *
- * It holds at most one socket, correlates commands with the
- * `command.accepted` / `command.rejected` frames that echo their request ID,
- * and copies authoritative snapshots into the live store. It decides nothing
- * about a game and carries no credential: the upgrade is authenticated by the
- * session cookie the browser attaches, and the server names the user.
+ * Owns one cookie-authenticated WebSocket, correlates command replies, and
+ * copies authoritative snapshots into the live store.
  */
 
 import {
+  UNTIMED,
   WsServerMessageSchema,
+  type TimeControl,
   type WsClientMessage,
   type WsErrorCode,
   type WsGameMoveMessage,
   type WsServerMessage,
 } from "@poe2/protocol";
+import { PLAYER_ONE, type Player } from "@poe2/rules";
 
-import { browserClock, type CancelTimer, type LiveClock } from "./clock.ts";
+import { browserClock, type CancelTimer, type Clock } from "../runtime/clock.ts";
 import {
   createBrowserSocket,
   liveSocketUrl,
@@ -27,12 +25,16 @@ import {
   createLiveStore,
   INITIAL_LIVE_STATE,
   removeGame,
+  removeGameReceiptTime,
   upsertGame,
   type LiveStore,
 } from "./store.ts";
 
 /** RFC 6455 normal closure, used whenever this end ends the connection. */
 const NORMAL_CLOSURE = 1000;
+
+/** RFC 6455 protocol error: the peer sent a frame this build cannot understand. */
+const PROTOCOL_ERROR = 1002;
 
 /**
  * RFC 6455 policy violation. The server sends it when the session behind an
@@ -42,6 +44,7 @@ const NORMAL_CLOSURE = 1000;
 const POLICY_VIOLATION = 1008;
 
 const CLIENT_CLOSE_REASON = "client shutdown";
+const PROTOCOL_ERROR_REASON = "server protocol did not match";
 
 const RECONNECT_BASE_DELAY_MS = 500;
 const RECONNECT_MAX_DELAY_MS = 30_000;
@@ -68,11 +71,31 @@ export interface PlayMoveInput {
   readonly square: WsGameMoveMessage["square"];
 }
 
+export interface ResignGameInput {
+  readonly gameId: string;
+  /** Prevents conceding a position that changed during confirmation. */
+  readonly expectedRevision: number;
+}
+
+export interface ReadyCheckCommandInput {
+  readonly gameId: string;
+  /** Binds the decision to the ready-check snapshot that prompted it. */
+  readonly readyCheckGeneration: number;
+}
+
 export interface LiveCommands {
-  createLobby(): Promise<LiveCommandResult>;
+  createLobby(
+    rated: boolean,
+    timeControl?: TimeControl,
+    creatorSeat?: Player,
+  ): Promise<LiveCommandResult>;
   joinLobby(gameId: string): Promise<LiveCommandResult>;
   cancelLobby(gameId: string): Promise<LiveCommandResult>;
+  /** Idempotent within the ready-check generation. */
+  readyGame(input: ReadyCheckCommandInput): Promise<LiveCommandResult>;
+  declineGame(input: ReadyCheckCommandInput): Promise<LiveCommandResult>;
   playMove(input: PlayMoveInput): Promise<LiveCommandResult>;
+  resignGame(input: ResignGameInput): Promise<LiveCommandResult>;
 }
 
 export interface LiveClient extends LiveCommands {
@@ -87,7 +110,7 @@ export interface LiveClient extends LiveCommands {
 
 export interface LiveClientOptions {
   readonly createSocket?: LiveSocketFactory;
-  readonly clock?: LiveClock;
+  readonly clock?: Clock;
   readonly resolveUrl?: () => string;
   readonly createRequestId?: () => string;
   readonly random?: () => number;
@@ -98,6 +121,8 @@ export interface LiveClientOptions {
    * deciding anything about the session here.
    */
   readonly onSessionSuspect?: () => void;
+  /** Invalidates archives after a finish or a reconnect that may have missed one. */
+  readonly onGameHistoryStale?: (userId: string) => void;
 }
 
 export type LiveClientFactory = (options: LiveClientOptions) => LiveClient;
@@ -134,6 +159,7 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
   const createRequestId = options.createRequestId ?? (() => crypto.randomUUID());
   const random = options.random ?? Math.random;
   const onSessionSuspect = options.onSessionSuspect ?? (() => {});
+  const onGameHistoryStale = options.onGameHistoryStale ?? (() => {});
 
   const store = createLiveStore();
   const pending = new Map<string, PendingCommand>();
@@ -180,8 +206,7 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
     return true;
   };
 
-  /** Drops the socket, the reconnect timer, and every pending command. */
-  const teardown = (): void => {
+  const teardown = (closeCode = NORMAL_CLOSURE, closeReason = CLIENT_CLOSE_REASON): void => {
     generation += 1;
     sessionEstablished = false;
     cancelRetry?.();
@@ -190,7 +215,7 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
     const current = socket;
     socket = null;
     settleAll("connection_lost");
-    current?.close(NORMAL_CLOSURE, CLIENT_CLOSE_REASON);
+    current?.close(closeCode, closeReason);
   };
 
   const abandonAsUnauthenticated = (): void => {
@@ -200,6 +225,15 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
     attempt = 0;
     store.setState({ ...INITIAL_LIVE_STATE, status: "unauthenticated" });
     onSessionSuspect();
+  };
+
+  const abandonAsProtocolError = (): void => {
+    const userId = desiredUserId;
+    teardown(PROTOCOL_ERROR, PROTOCOL_ERROR_REASON);
+    running = false;
+    attempt = 0;
+    // A malformed opening may have left a partial replay, so retain no snapshots.
+    store.setState({ ...INITIAL_LIVE_STATE, status: "disconnected", userId });
   };
 
   const applyServerMessage = (message: WsServerMessage): void => {
@@ -214,15 +248,29 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
         }
 
         sessionEstablished = true;
-        attempt = 0;
-        // A reconnect replays the whole opening sequence, and games finished
-        // while this client was away are deliberately not replayed. Anything
-        // held from the previous socket is therefore dropped, not merged.
+        // Replace prior socket state and remain unavailable until replay completion.
+        const reconnectAttempts = store.getState().reconnectAttempts;
         store.setState({
           ...INITIAL_LIVE_STATE,
-          status: "ready",
+          status: attempt === 0 ? "connecting" : "reconnecting",
           userId: message.user.id,
+          reconnectAttempts,
         });
+        return;
+      }
+
+      case "session.synced": {
+        // Never bypass the exact-version `session.ready` handshake.
+        if (!sessionEstablished) {
+          return;
+        }
+
+        const reconnected = attempt > 0;
+        attempt = 0;
+        store.setState({ status: "ready", synced: true, reconnectAttempts: 0 });
+        if (reconnected && desiredUserId !== null) {
+          onGameHistoryStale(desiredUserId);
+        }
         return;
       }
 
@@ -230,12 +278,23 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
         store.setState({ lobbies: message.lobbies });
         return;
 
-      case "game.snapshot":
-        store.setState((state) => ({ games: upsertGame(state.games, message.game) }));
+      case "game.snapshot": {
+        const receivedAtMs = clock.now();
+        store.setState((state) => ({
+          games: upsertGame(state.games, message.game),
+          gameReceivedAtMs: { ...state.gameReceivedAtMs, [message.game.id]: receivedAtMs },
+        }));
+        if (message.game.status === "finished" && desiredUserId !== null) {
+          onGameHistoryStale(desiredUserId);
+        }
         return;
+      }
 
       case "game.closed":
-        store.setState((state) => ({ games: removeGame(state.games, message.gameId) }));
+        store.setState((state) => ({
+          games: removeGame(state.games, message.gameId),
+          gameReceivedAtMs: removeGameReceiptTime(state.gameReceivedAtMs, message.gameId),
+        }));
         return;
 
       case "command.accepted":
@@ -312,11 +371,13 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
         }
 
         const message = parseServerMessage(payload);
-        // A frame that does not match the shared schema is dropped rather than
-        // allowed to write anything into the store.
-        if (message !== null) {
-          applyServerMessage(message);
+        if (message === null) {
+          // Retrying the same incompatible server cannot heal a protocol mismatch.
+          // Fail closed and let the UI ask for a reload/new client build.
+          abandonAsProtocolError();
+          return;
         }
+        applyServerMessage(message);
       },
       onClose: (code) => {
         if (token !== generation) {
@@ -396,11 +457,28 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
       store.setState({ ...INITIAL_LIVE_STATE });
     },
 
-    createLobby: () => send({ type: "lobby.create", requestId: createRequestId() }),
+    createLobby: (rated, timeControl = UNTIMED, creatorSeat = PLAYER_ONE) =>
+      send({ type: "lobby.create", requestId: createRequestId(), rated, timeControl, creatorSeat }),
 
     joinLobby: (gameId) => send({ type: "lobby.join", requestId: createRequestId(), gameId }),
 
     cancelLobby: (gameId) => send({ type: "lobby.cancel", requestId: createRequestId(), gameId }),
+
+    readyGame: ({ gameId, readyCheckGeneration }) =>
+      send({
+        type: "game.ready",
+        requestId: createRequestId(),
+        gameId,
+        readyCheckGeneration,
+      }),
+
+    declineGame: ({ gameId, readyCheckGeneration }) =>
+      send({
+        type: "game.decline",
+        requestId: createRequestId(),
+        gameId,
+        readyCheckGeneration,
+      }),
 
     playMove: (input) =>
       send({
@@ -409,6 +487,14 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
         gameId: input.gameId,
         expectedRevision: input.expectedRevision,
         square: input.square,
+      }),
+
+    resignGame: (input) =>
+      send({
+        type: "game.resign",
+        requestId: createRequestId(),
+        gameId: input.gameId,
+        expectedRevision: input.expectedRevision,
       }),
   };
 }

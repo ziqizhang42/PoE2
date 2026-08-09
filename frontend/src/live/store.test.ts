@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { GAME_ID, OTHER_GAME_ID, waitingGame } from "../test/fakes.ts";
-import { createLiveStore, INITIAL_LIVE_STATE, removeGame, upsertGame } from "./store.ts";
+import {
+  createLiveStore,
+  INITIAL_LIVE_STATE,
+  removeGame,
+  removeGameReceiptTime,
+  upsertGame,
+} from "./store.ts";
 
 describe("createLiveStore", () => {
   it("starts idle with nothing belonging to a user", () => {
@@ -44,5 +50,14 @@ describe("removeGame", () => {
     const games = [waitingGame()];
 
     expect(removeGame(games, OTHER_GAME_ID)).toBe(games);
+  });
+});
+
+describe("removeGameReceiptTime", () => {
+  it("removes only the closed game's monotonic anchor", () => {
+    const receivedAt = { [GAME_ID]: 10, [OTHER_GAME_ID]: 20 };
+
+    expect(removeGameReceiptTime(receivedAt, GAME_ID)).toEqual({ [OTHER_GAME_ID]: 20 });
+    expect(removeGameReceiptTime(receivedAt, "missing")).toBe(receivedAt);
   });
 });

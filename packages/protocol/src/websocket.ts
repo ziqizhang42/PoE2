@@ -1,30 +1,19 @@
-/**
- * The browser WebSocket protocol.
- *
- * Frames are JSON text. Every client message carries a `requestId` that the
- * server echoes on `command.accepted` or `command.rejected`, which is the only
- * correlation mechanism: every other server message is an unsolicited state
- * push rather than a reply.
- *
- * Nothing here carries a credential. Authentication happens once, during the
- * HTTP upgrade, and the identity it establishes belongs to the server; a client
- * cannot name a user, a player number, a board, a score, or a result.
- */
-
-import type { Square } from "@poe2/rules";
+import type { Player, Square } from "@poe2/rules";
 import { z } from "zod";
 
 import { AuthUserSchema, type AuthUser } from "./auth.js";
-import { GameSnapshotSchema, LobbyEntrySchema, SquareSchema } from "./game.js";
-import type { GameSnapshot, LobbyEntry } from "./game.js";
+import {
+  GameSnapshotSchema,
+  LobbyEntrySchema,
+  PlayerSchema,
+  SquareSchema,
+  TimeControlSchema,
+} from "./game.js";
+import type { GameSnapshot, LobbyEntry, TimeControl } from "./game.js";
 
 export const WS_PROTOCOL_VERSION = 1;
 
-/**
- * Closed set of rejection reasons. `invalid_message` and `internal_error` are
- * transport-level; the rest name a decision the authoritative game service
- * made, and carry the same meaning for any other adapter in front of it.
- */
+/** Closed rejection set shared by client and adapter. */
 export type WsErrorCode =
   | "invalid_message"
   | "game_not_found"
@@ -32,15 +21,22 @@ export type WsErrorCode =
   | "cannot_join_own_game"
   | "not_lobby_owner"
   | "not_a_player"
+  | "game_not_ready_check"
   | "not_your_turn"
   | "stale_game"
   | "occupied"
   | "game_over"
+  | "lobby_already_open"
+  | "rated_requires_clock"
+  | "rate_limited"
   | "internal_error";
 
 export interface WsLobbyCreateMessage {
   readonly type: "lobby.create";
   readonly requestId: string;
+  readonly rated: boolean;
+  readonly creatorSeat: Player;
+  readonly timeControl: TimeControl;
 }
 
 export interface WsLobbyJoinMessage {
@@ -59,16 +55,41 @@ export interface WsGameMoveMessage {
   readonly type: "game.move";
   readonly requestId: string;
   readonly gameId: string;
-  /** The revision the client believes it is moving from. */
   readonly expectedRevision: number;
   readonly square: Square;
+}
+
+export interface WsGameResignMessage {
+  readonly type: "game.resign";
+  readonly requestId: string;
+  readonly gameId: string;
+  readonly expectedRevision: number;
+}
+
+/** Idempotent within one ready-check generation. */
+export interface WsGameReadyMessage {
+  readonly type: "game.ready";
+  readonly requestId: string;
+  readonly gameId: string;
+  readonly readyCheckGeneration: number;
+}
+
+/** Releases the joining seat without recording a result. */
+export interface WsGameDeclineMessage {
+  readonly type: "game.decline";
+  readonly requestId: string;
+  readonly gameId: string;
+  readonly readyCheckGeneration: number;
 }
 
 export type WsClientMessage =
   | WsLobbyCreateMessage
   | WsLobbyJoinMessage
   | WsLobbyCancelMessage
-  | WsGameMoveMessage;
+  | WsGameReadyMessage
+  | WsGameDeclineMessage
+  | WsGameMoveMessage
+  | WsGameResignMessage;
 
 export interface WsSessionReadyMessage {
   readonly type: "session.ready";
@@ -91,6 +112,11 @@ export interface WsGameClosedMessage {
   readonly gameId: string;
 }
 
+/** Marks the opening replay complete; session.ready alone does not. */
+export interface WsSessionSyncedMessage {
+  readonly type: "session.synced";
+}
+
 export interface WsCommandAcceptedMessage {
   readonly type: "command.accepted";
   readonly requestId: string;
@@ -106,6 +132,7 @@ export interface WsCommandRejectedMessage {
 
 export type WsServerMessage =
   | WsSessionReadyMessage
+  | WsSessionSyncedMessage
   | WsLobbySnapshotMessage
   | WsGameSnapshotMessage
   | WsGameClosedMessage
@@ -115,24 +142,49 @@ export type WsServerMessage =
 const requestIdSchema = z.uuid();
 const gameIdSchema = z.uuid();
 
-const errorCodeSchema = z.enum([
+// `satisfies` checks the list against the union; adapter tests check the reverse.
+const ERROR_CODES = [
   "invalid_message",
   "game_not_found",
   "game_not_waiting",
   "cannot_join_own_game",
   "not_lobby_owner",
   "not_a_player",
+  "game_not_ready_check",
   "not_your_turn",
   "stale_game",
   "occupied",
   "game_over",
+  "lobby_already_open",
+  "rated_requires_clock",
+  "rate_limited",
   "internal_error",
-]);
+] as const satisfies readonly WsErrorCode[];
+
+const errorCodeSchema = z.enum(ERROR_CODES);
 
 const lobbyCreateMessageSchema = z.strictObject({
   type: z.literal("lobby.create"),
   requestId: requestIdSchema,
+  rated: z.boolean(),
+  creatorSeat: PlayerSchema,
+  timeControl: TimeControlSchema,
 });
+
+// Applied after constructing the discriminated union because its members must
+// remain plain object schemas.
+function checkRatedHasClock(message: WsClientMessage, context: z.RefinementCtx): void {
+  if (message.type !== "lobby.create") {
+    return;
+  }
+  if (message.rated && message.timeControl.kind === "untimed") {
+    context.addIssue({
+      code: "custom",
+      path: ["timeControl"],
+      message: "A rated game must have a clock",
+    });
+  }
+}
 
 const lobbyJoinMessageSchema = z.strictObject({
   type: z.literal("lobby.join"),
@@ -146,6 +198,20 @@ const lobbyCancelMessageSchema = z.strictObject({
   gameId: gameIdSchema,
 });
 
+const gameReadyMessageSchema = z.strictObject({
+  type: z.literal("game.ready"),
+  requestId: requestIdSchema,
+  gameId: gameIdSchema,
+  readyCheckGeneration: z.int().min(1),
+});
+
+const gameDeclineMessageSchema = z.strictObject({
+  type: z.literal("game.decline"),
+  requestId: requestIdSchema,
+  gameId: gameIdSchema,
+  readyCheckGeneration: z.int().min(1),
+});
+
 const gameMoveMessageSchema = z.strictObject({
   type: z.literal("game.move"),
   requestId: requestIdSchema,
@@ -154,10 +220,21 @@ const gameMoveMessageSchema = z.strictObject({
   square: SquareSchema,
 });
 
+const gameResignMessageSchema = z.strictObject({
+  type: z.literal("game.resign"),
+  requestId: requestIdSchema,
+  gameId: gameIdSchema,
+  expectedRevision: z.int().min(0),
+});
+
 const sessionReadyMessageSchema = z.strictObject({
   type: z.literal("session.ready"),
   protocolVersion: z.literal(WS_PROTOCOL_VERSION),
   user: AuthUserSchema,
+});
+
+const sessionSyncedMessageSchema = z.strictObject({
+  type: z.literal("session.synced"),
 });
 
 const lobbySnapshotMessageSchema = z.strictObject({
@@ -191,20 +268,31 @@ export const WS_ERROR_CODES: readonly WsErrorCode[] = errorCodeSchema.options;
 
 export const WsErrorCodeSchema: z.ZodType<WsErrorCode> = errorCodeSchema;
 
-export const WsLobbyCreateMessageSchema: z.ZodType<WsLobbyCreateMessage> = lobbyCreateMessageSchema;
+export const WsLobbyCreateMessageSchema: z.ZodType<WsLobbyCreateMessage> =
+  lobbyCreateMessageSchema.superRefine(checkRatedHasClock);
 export const WsLobbyJoinMessageSchema: z.ZodType<WsLobbyJoinMessage> = lobbyJoinMessageSchema;
 export const WsLobbyCancelMessageSchema: z.ZodType<WsLobbyCancelMessage> = lobbyCancelMessageSchema;
+export const WsGameReadyMessageSchema: z.ZodType<WsGameReadyMessage> = gameReadyMessageSchema;
+export const WsGameDeclineMessageSchema: z.ZodType<WsGameDeclineMessage> = gameDeclineMessageSchema;
 export const WsGameMoveMessageSchema: z.ZodType<WsGameMoveMessage> = gameMoveMessageSchema;
+export const WsGameResignMessageSchema: z.ZodType<WsGameResignMessage> = gameResignMessageSchema;
 
-export const WsClientMessageSchema: z.ZodType<WsClientMessage> = z.discriminatedUnion("type", [
-  lobbyCreateMessageSchema,
-  lobbyJoinMessageSchema,
-  lobbyCancelMessageSchema,
-  gameMoveMessageSchema,
-]);
+export const WsClientMessageSchema: z.ZodType<WsClientMessage> = z
+  .discriminatedUnion("type", [
+    lobbyCreateMessageSchema,
+    lobbyJoinMessageSchema,
+    lobbyCancelMessageSchema,
+    gameReadyMessageSchema,
+    gameDeclineMessageSchema,
+    gameMoveMessageSchema,
+    gameResignMessageSchema,
+  ])
+  .superRefine(checkRatedHasClock);
 
 export const WsSessionReadyMessageSchema: z.ZodType<WsSessionReadyMessage> =
   sessionReadyMessageSchema;
+export const WsSessionSyncedMessageSchema: z.ZodType<WsSessionSyncedMessage> =
+  sessionSyncedMessageSchema;
 export const WsLobbySnapshotMessageSchema: z.ZodType<WsLobbySnapshotMessage> =
   lobbySnapshotMessageSchema;
 export const WsGameSnapshotMessageSchema: z.ZodType<WsGameSnapshotMessage> =
@@ -217,6 +305,7 @@ export const WsCommandRejectedMessageSchema: z.ZodType<WsCommandRejectedMessage>
 
 export const WsServerMessageSchema: z.ZodType<WsServerMessage> = z.discriminatedUnion("type", [
   sessionReadyMessageSchema,
+  sessionSyncedMessageSchema,
   lobbySnapshotMessageSchema,
   gameSnapshotMessageSchema,
   gameClosedMessageSchema,

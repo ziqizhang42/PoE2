@@ -1,3 +1,2 @@
-export function normalizeUsername(username: string): string {
-  return username.toLowerCase();
-}
+// Compatibility export; the protocol package owns username normalization.
+export { normalizeUsername } from "@poe2/protocol";

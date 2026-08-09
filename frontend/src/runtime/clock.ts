@@ -1,11 +1,12 @@
 export type CancelTimer = () => void;
 
-export interface LiveClock {
-  /** Returns a canceller rather than a handle, so no timer type escapes. */
+export interface Clock {
+  now(): number;
   schedule(callback: () => void, delayMs: number): CancelTimer;
 }
 
-export const browserClock: LiveClock = {
+export const browserClock: Clock = {
+  now: () => performance.now(),
   schedule(callback, delayMs) {
     const handle = setTimeout(callback, delayMs);
     return () => {

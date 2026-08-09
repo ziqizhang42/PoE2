@@ -5,6 +5,11 @@ export const USERNAME_MAX_LENGTH = 32;
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 
+/** Locale-independent fold for the protocol's ASCII-only usernames. */
+export function normalizeUsername(username: string): string {
+  return username.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
+}
+
 export type AuthErrorCode =
   | "internal_error"
   | "invalid_credentials"

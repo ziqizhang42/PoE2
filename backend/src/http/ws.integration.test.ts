@@ -9,6 +9,7 @@ import {
   type GameSnapshot,
   type WsServerMessage,
 } from "@poe2/protocol";
+import { PLAYER_ONE } from "@poe2/rules";
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +25,13 @@ import { createDatabaseClient } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { createGameRepository } from "../game/repository.js";
 import { createGameService, type GameService } from "../game/service.js";
+import { readWebSocketLimitsConfig, type WebSocketLimitsConfig } from "../config/ws-limits.js";
+import { createFakeClock } from "../limits/test-doubles.js";
+import {
+  createWebSocketLimits,
+  type WebSocketLimits,
+  type WebSocketLimitsSeams,
+} from "../limits/websocket-limits.js";
 import { authPlugin } from "./auth.js";
 import { createConnectionHub } from "./ws-hub.js";
 import { registerWebSocket, WS_ROUTE } from "./ws.js";
@@ -42,6 +50,22 @@ const realGameService = createGameService(createGameRepository(database.db));
 const hub = createConnectionHub();
 const app = buildApp();
 
+/** Real but generous limits for tests not specifically exercising a ceiling. */
+function testLimitsConfig(overrides: Partial<WebSocketLimitsConfig> = {}): WebSocketLimitsConfig {
+  return {
+    ...readWebSocketLimitsConfig({}),
+    userCommands: { capacity: 10_000, refillPerSecond: 1_000 },
+    addressCommands: { capacity: 10_000, refillPerSecond: 1_000 },
+    connections: { maxPerUser: 64, maxPerAddress: 512 },
+    maxPendingCommands: 256,
+    ...overrides,
+  };
+}
+
+function testLimits(overrides: Partial<WebSocketLimitsConfig> = {}): WebSocketLimits {
+  return createWebSocketLimits(testLimitsConfig(overrides));
+}
+
 app.register(authPlugin, { ...authConfig, service: authService });
 
 await registerWebSocket(app, {
@@ -50,6 +74,7 @@ await registerWebSocket(app, {
   authService,
   gameService: realGameService,
   hub,
+  limits: testLimits(),
 });
 
 await app.ready();
@@ -207,7 +232,7 @@ function send(client: Client, message: Record<string, unknown>): void {
   client.socket.send(JSON.stringify(message));
 }
 
-/** Consumes the three-message opening sequence and returns the restored games. */
+/** Consumes the whole opening sequence and returns the restored games. */
 async function readOpeningState(
   client: Client,
   user: AuthUser,
@@ -233,6 +258,8 @@ async function readOpeningState(
     }
     games.push(snapshot.game);
   }
+
+  expect(await client.next()).toEqual({ type: "session.synced" });
 
   return { lobbies: lobby.lobbies, games };
 }
@@ -304,7 +331,9 @@ describe("frame handling", () => {
     await readOpeningState(client, alice.user);
 
     client.socket.send("this is not json");
-    client.socket.send(JSON.stringify({ type: "lobby.create", requestId: "not-a-uuid" }));
+    client.socket.send(
+      JSON.stringify({ type: "lobby.create", requestId: "not-a-uuid", rated: false }),
+    );
     client.socket.send(JSON.stringify(["lobby.create"]));
     client.socket.send(JSON.stringify({ requestId: 17 }));
 
@@ -395,7 +424,13 @@ describe("lobby and game lifecycle", () => {
     await readOpeningState(bobClient, bob.user);
 
     const createId = randomUUID();
-    send(aliceClient, { type: "lobby.create", requestId: createId });
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: createId,
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
 
     expect(await aliceClient.next()).toEqual({ type: "command.accepted", requestId: createId });
     const created = await expectGameSnapshot(aliceClient);
@@ -408,7 +443,14 @@ describe("lobby and game lifecycle", () => {
     // Both connected users see the new lobby.
     expect(await expectLobbySnapshot(aliceClient)).toHaveLength(1);
     expect(await expectLobbySnapshot(bobClient)).toEqual([
-      { id: created.id, playerOne: alice.user, createdAt: created.createdAt },
+      {
+        id: created.id,
+        owner: alice.user,
+        creatorSeat: PLAYER_ONE,
+        rated: false,
+        timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+        createdAt: created.createdAt,
+      },
     ]);
 
     const joinId = randomUUID();
@@ -420,22 +462,66 @@ describe("lobby and game lifecycle", () => {
 
     expect(bobJoined).toEqual(aliceJoined);
     expect(bobJoined).toMatchObject({
-      status: "active",
+      status: "ready_check",
       revision: 1,
-      sideToMove: 1,
+      sideToMove: null,
       players: { playerOne: alice.user, playerTwo: bob.user },
+      readyCheck: { playerOneReady: false, playerTwoReady: false },
     });
+    if (bobJoined.status !== "ready_check") {
+      throw new Error(`expected ready_check, got ${bobJoined.status}`);
+    }
+    const readyCheckGeneration = bobJoined.readyCheck.generation;
 
-    // The lobby is gone for everyone now that it is being played.
+    // The lobby is gone for everyone the moment the seat is taken.
     expect(await expectLobbySnapshot(bobClient)).toEqual([]);
     expect(await expectLobbySnapshot(aliceClient)).toEqual([]);
+
+    const aliceReadyId = randomUUID();
+    send(aliceClient, {
+      type: "game.ready",
+      requestId: aliceReadyId,
+      gameId: created.id,
+      readyCheckGeneration,
+    });
+
+    expect(await aliceClient.next()).toEqual({
+      type: "command.accepted",
+      requestId: aliceReadyId,
+    });
+    const oneConfirmed = await expectGameSnapshot(aliceClient);
+    expect(await expectGameSnapshot(bobClient)).toEqual(oneConfirmed);
+    expect(oneConfirmed).toMatchObject({
+      status: "ready_check",
+      readyCheck: { playerOneReady: true, playerTwoReady: false },
+    });
+
+    const bobReadyId = randomUUID();
+    send(bobClient, {
+      type: "game.ready",
+      requestId: bobReadyId,
+      gameId: created.id,
+      readyCheckGeneration,
+    });
+
+    expect(await bobClient.next()).toEqual({ type: "command.accepted", requestId: bobReadyId });
+    const bobStarted = await expectGameSnapshot(bobClient);
+    const aliceStarted = await expectGameSnapshot(aliceClient);
+
+    expect(bobStarted).toEqual(aliceStarted);
+    expect(bobStarted).toMatchObject({
+      status: "active",
+      revision: 3,
+      sideToMove: 1,
+      readyCheck: null,
+    });
 
     const moveId = randomUUID();
     send(aliceClient, {
       type: "game.move",
       requestId: moveId,
       gameId: created.id,
-      expectedRevision: 1,
+      expectedRevision: 3,
       square: { row: 3, col: 3 },
     });
 
@@ -445,7 +531,7 @@ describe("lobby and game lifecycle", () => {
 
     expect(aliceMoved).toEqual(bobSaw);
     expect(aliceMoved).toMatchObject({
-      revision: 2,
+      revision: 4,
       sideToMove: 2,
       moves: [{ row: 3, col: 3 }],
     });
@@ -543,7 +629,13 @@ describe("lobby and game lifecycle", () => {
     await readOpeningState(bobClient, bob.user);
 
     const createId = randomUUID();
-    send(aliceClient, { type: "lobby.create", requestId: createId });
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: createId,
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
     await aliceClient.next();
     const created = await expectGameSnapshot(aliceClient);
     await expectLobbySnapshot(aliceClient);
@@ -567,7 +659,13 @@ describe("lobby and game lifecycle", () => {
     await readOpeningState(aliceClient, alice.user);
     await readOpeningState(bobClient, bob.user);
 
-    send(aliceClient, { type: "lobby.create", requestId: randomUUID() });
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
     await aliceClient.next();
     const created = await expectGameSnapshot(aliceClient);
     await expectLobbySnapshot(aliceClient);
@@ -601,6 +699,53 @@ describe("lobby and game lifecycle", () => {
     expect(opening.games).toEqual([game]);
     expect(hub.connectionCount(alice.user.id)).toBe(2);
   });
+
+  it("restores a ready check so a reconnecting player can still confirm", async () => {
+    const alice = await register("Alice");
+    const bob = await register("Bob");
+    const aliceClient = await connect(alice);
+    const bobClient = await connect(bob);
+
+    await readOpeningState(aliceClient, alice.user);
+    await readOpeningState(bobClient, bob.user);
+
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+    await aliceClient.next();
+    const created = await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+
+    send(bobClient, { type: "lobby.join", requestId: randomUUID(), gameId: created.id });
+    await bobClient.next();
+    const readyCheck = await expectGameSnapshot(bobClient);
+    await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    await expectLobbySnapshot(aliceClient);
+
+    const reconnected = await connect(alice);
+    const opening = await readOpeningState(reconnected, alice.user, 1);
+
+    if (readyCheck.status !== "ready_check") {
+      throw new Error(`expected ready_check, got ${readyCheck.status}`);
+    }
+
+    expect(opening.games).toEqual([
+      {
+        ...readyCheck,
+        readyCheck: {
+          ...readyCheck.readyCheck,
+          serverNow: expect.any(String),
+        },
+      },
+    ]);
+    expect(opening.games[0]?.status).toBe("ready_check");
+  });
 });
 
 describe("session lifetime", () => {
@@ -616,7 +761,13 @@ describe("session lifetime", () => {
     });
     expect(logout.statusCode).toBe(204);
 
-    send(client, { type: "lobby.create", requestId: randomUUID() });
+    send(client, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
 
     // Policy violation, and no command was carried out.
     expect(await client.closed()).toEqual({ code: 1008 });
@@ -659,7 +810,13 @@ describe("unexpected failures", () => {
       await readOpeningState(client, alice.user);
 
       const requestId = randomUUID();
-      send(client, { type: "lobby.create", requestId });
+      send(client, {
+        type: "lobby.create",
+        requestId,
+        rated: false,
+        creatorSeat: PLAYER_ONE,
+        timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+      });
 
       expect(await client.next()).toEqual({ type: "command.accepted", requestId });
       const created = await expectGameSnapshot(client);
@@ -709,6 +866,255 @@ describe("unexpected failures", () => {
   });
 });
 
+describe("abuse controls", () => {
+  it("refuses an upgrade past the per-user connection cap", async () => {
+    const limited = await buildLimitedApp({ connections: { maxPerUser: 1, maxPerAddress: 64 } });
+    const account = await register("cap_one");
+
+    try {
+      expect(await limited.attempt(account)).toBe("connected");
+      expect(await limited.attempt(account)).toBe(429);
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("does not overshoot the cap when upgrades arrive together", async () => {
+    const limited = await buildLimitedApp({ connections: { maxPerUser: 2, maxPerAddress: 64 } });
+    const account = await register("cap_race");
+
+    try {
+      const results = await Promise.all(Array.from({ length: 6 }, () => limited.attempt(account)));
+
+      expect(results.filter((result) => result === "connected")).toHaveLength(2);
+      expect(results.filter((result) => result === 429)).toHaveLength(4);
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("gives a connection slot back when the socket closes", async () => {
+    const limited = await buildLimitedApp({ connections: { maxPerUser: 1, maxPerAddress: 64 } });
+    const account = await register("cap_release");
+
+    try {
+      const first = await limited.connect(account);
+      await readOpeningState(first, account.user);
+      expect(await limited.attempt(account)).toBe(429);
+
+      first.close();
+      await settle();
+
+      expect(await limited.attempt(account)).toBe("connected");
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("caps one address across different accounts", async () => {
+    const limited = await buildLimitedApp({ connections: { maxPerUser: 8, maxPerAddress: 1 } });
+    const [one, two] = await Promise.all([register("addr_one"), register("addr_two")]);
+
+    try {
+      expect(await limited.attempt(one)).toBe("connected");
+      expect(await limited.attempt(two)).toBe(429);
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("rejects commands past the budget and accepts them again once it refills", async () => {
+    const clock = createFakeClock();
+    const limited = await buildLimitedApp(
+      { userCommands: { capacity: 2, refillPerSecond: 1 } },
+      { clock },
+    );
+    const account = await register("budget_user");
+
+    try {
+      const client = await limited.connect(account);
+      await readOpeningState(client, account.user);
+
+      for (let spent = 0; spent < 2; spent += 1) {
+        send(client, { type: "lobby.cancel", requestId: randomUUID(), gameId: randomUUID() });
+        expect(await client.next()).toMatchObject({ code: "game_not_found" });
+      }
+
+      const throttledId = randomUUID();
+      send(client, { type: "lobby.cancel", requestId: throttledId, gameId: randomUUID() });
+      expect(await client.next()).toMatchObject({
+        type: "command.rejected",
+        requestId: throttledId,
+        code: "rate_limited",
+      });
+
+      clock.advance(1_000);
+
+      send(client, { type: "lobby.cancel", requestId: randomUUID(), gameId: randomUUID() });
+      expect(await client.next()).toMatchObject({ code: "game_not_found" });
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("charges a malformed frame against the budget, so garbage is not cheaper", async () => {
+    const limited = await buildLimitedApp({ userCommands: { capacity: 1, refillPerSecond: 1 } });
+    const account = await register("budget_garbage");
+
+    try {
+      const client = await limited.connect(account);
+      await readOpeningState(client, account.user);
+
+      client.socket.send("not json at all");
+      expect(await client.next()).toMatchObject({ code: "invalid_message" });
+
+      send(client, { type: "lobby.cancel", requestId: randomUUID(), gameId: randomUUID() });
+      expect(await client.next()).toMatchObject({ code: "rate_limited" });
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("closes a socket that outruns its pending-command bound", async () => {
+    const limited = await buildLimitedApp({ maxPendingCommands: 1 });
+    const account = await register("queue_bound");
+
+    try {
+      const client = await limited.connect(account);
+      await readOpeningState(client, account.user);
+
+      send(client, { type: "lobby.cancel", requestId: randomUUID(), gameId: randomUUID() });
+      send(client, { type: "lobby.cancel", requestId: randomUUID(), gameId: randomUUID() });
+
+      expect(await client.closed()).toEqual({ code: 1013 });
+    } finally {
+      await limited.app.close();
+    }
+  });
+
+  it("refuses a second waiting lobby from the same player", async () => {
+    const account = await register("one_lobby");
+    const client = await connect(account);
+    await readOpeningState(client, account.user);
+
+    send(client, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+    expect(await client.next()).toMatchObject({ type: "command.accepted" });
+    await expectGameSnapshot(client);
+    await expectLobbySnapshot(client);
+
+    const secondId = randomUUID();
+    send(client, {
+      type: "lobby.create",
+      requestId: secondId,
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+
+    expect(await client.next()).toMatchObject({
+      type: "command.rejected",
+      requestId: secondId,
+      code: "lobby_already_open",
+    });
+  });
+
+  it("lets exactly one of two simultaneous creates through", async () => {
+    const account = await register("one_lobby_race");
+    const [first, second] = await Promise.all([connect(account), connect(account)]);
+    await Promise.all([
+      readOpeningState(first, account.user),
+      readOpeningState(second, account.user),
+    ]);
+
+    send(first, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+    send(second, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+
+    const outcomes = await Promise.all([
+      collectCommandOutcome(first),
+      collectCommandOutcome(second),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome === "accepted")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome === "lobby_already_open")).toHaveLength(1);
+  });
+});
+
+async function collectCommandOutcome(client: Client): Promise<string> {
+  for (;;) {
+    const message = await client.next();
+
+    if (message.type === "command.accepted") {
+      return "accepted";
+    }
+    if (message.type === "command.rejected") {
+      return message.code;
+    }
+  }
+}
+
+/** Builds an isolated app with test-specific limits. */
+async function buildLimitedApp(
+  overrides: Partial<WebSocketLimitsConfig>,
+  seams: WebSocketLimitsSeams = {},
+): Promise<{
+  readonly app: FastifyInstance;
+  connect: (account: Account) => Promise<Client>;
+  attempt: (account: Account) => Promise<number | "connected">;
+}> {
+  const limitedApp = buildApp();
+
+  await registerWebSocket(limitedApp, {
+    ...authConfig,
+    allowedOrigins: [ALLOWED_ORIGIN],
+    authService,
+    gameService: realGameService,
+    hub: createConnectionHub(),
+    limits: createWebSocketLimits(testLimitsConfig(overrides), seams),
+  });
+
+  await limitedApp.ready();
+
+  return {
+    app: limitedApp,
+    connect: (account) => connect(account, ALLOWED_ORIGIN, limitedApp),
+
+    /** `injectWS` exposes a refused upgrade's status only in its thrown message. */
+    async attempt(account) {
+      try {
+        await connect(account, ALLOWED_ORIGIN, limitedApp);
+        return "connected";
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = /\b(\d{3})\b/u.exec(message)?.at(1);
+
+        if (status === undefined) {
+          throw error;
+        }
+
+        return Number(status);
+      }
+    },
+  };
+}
+
 /**
  * A second app wired to the same database, with chosen service methods made to
  * fail, for pinning what happens when something unexpected goes wrong.
@@ -726,6 +1132,7 @@ async function buildFaultyApp(
     authService: { ...authService, ...authOverrides },
     gameService: { ...realGameService, ...gameOverrides },
     hub: createConnectionHub(),
+    limits: testLimits(),
   });
 
   await faultyApp.ready();
@@ -740,7 +1147,13 @@ async function startGameThrough(
   owner: Account,
   joiner: Account,
 ): Promise<GameSnapshot> {
-  send(ownerClient, { type: "lobby.create", requestId: randomUUID() });
+  send(ownerClient, {
+    type: "lobby.create",
+    requestId: randomUUID(),
+    rated: false,
+    creatorSeat: PLAYER_ONE,
+    timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+  });
   await ownerClient.next();
   const created = await expectGameSnapshot(ownerClient);
   await expectLobbySnapshot(ownerClient);
@@ -755,6 +1168,30 @@ async function startGameThrough(
 
   expect(joined.players.playerOne.id).toBe(owner.user.id);
   expect(joined.players.playerTwo?.id).toBe(joiner.user.id);
+  if (joined.status !== "ready_check") {
+    throw new Error(`expected ready_check, got ${joined.status}`);
+  }
+  const readyCheckGeneration = joined.readyCheck.generation;
 
-  return joined;
+  send(ownerClient, {
+    type: "game.ready",
+    requestId: randomUUID(),
+    gameId: created.id,
+    readyCheckGeneration,
+  });
+  await ownerClient.next();
+  await expectGameSnapshot(ownerClient);
+  await expectGameSnapshot(joinerClient);
+
+  send(joinerClient, {
+    type: "game.ready",
+    requestId: randomUUID(),
+    gameId: created.id,
+    readyCheckGeneration,
+  });
+  await joinerClient.next();
+  const started = await expectGameSnapshot(joinerClient);
+  await expectGameSnapshot(ownerClient);
+
+  return started;
 }

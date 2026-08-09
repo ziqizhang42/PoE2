@@ -1,14 +1,3 @@
-/**
- * Board state for Powers of Exponent 2.
- *
- * The board is a flat array of 49 cells indexed `row * BOARD_SIZE + col`, the
- * same mapping the engine uses. Row 0 is rank 1 and column 0 is file a, so
- * `a1` is `{ row: 0, col: 0 }` and `g7` is `{ row: 6, col: 6 }`.
- *
- * Every value here is plain readonly data and every function is pure: placing a
- * piece returns a new board rather than mutating the one it was given.
- */
-
 export const BOARD_SIZE = 7;
 export const CELL_COUNT: number = BOARD_SIZE * BOARD_SIZE;
 
@@ -27,6 +16,7 @@ export interface Square {
   readonly col: number;
 }
 
+/** Flat row-major cells; row 0 is rank 1 and column 0 is file a. */
 export type Board = readonly Cell[];
 
 export function opponent(player: Player): Player {
@@ -96,12 +86,7 @@ export function isBoardFull(board: Board): boolean {
   return pieceCount(board) === CELL_COUNT;
 }
 
-/**
- * A copy of `board` with `player` occupying `square`.
- *
- * This is the raw board primitive and knows nothing about turn order, so it is
- * not part of the public rules API. Games advance through `applyMove`.
- */
+/** Raw placement primitive; game transitions should use `applyMove`. */
 export function placePiece(board: Board, player: Player, square: Square): Board {
   const index = squareIndex(square);
   if (board[index] !== EMPTY) {

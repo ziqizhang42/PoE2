@@ -2,16 +2,21 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createContext, useContext } from "react";
 
 import type { AuthClient } from "../auth/client.ts";
+import type { GamesClient } from "../games/client.ts";
 import type { LiveClient } from "../live/client.ts";
+import type { PlayersClient } from "../players/client.ts";
+import type { MotionPreference } from "../theme/motion.ts";
+import type { Clock } from "./clock.ts";
 
-/**
- * Everything the browser runtime owns, injected as one value so tests can
- * replace any part of it without touching module state.
- */
+/** Injectable browser runtime shared by the application and integration tests. */
 export interface AppRuntime {
   readonly queryClient: QueryClient;
   readonly authClient: AuthClient;
+  readonly gamesClient: GamesClient;
+  readonly playersClient: PlayersClient;
   readonly live: LiveClient;
+  readonly clock: Clock;
+  readonly motion: MotionPreference;
 }
 
 export const RuntimeContext = createContext<AppRuntime | null>(null);
@@ -30,6 +35,22 @@ export function useAuthClient(): AuthClient {
   return useAppRuntime().authClient;
 }
 
+export function useGamesClient(): GamesClient {
+  return useAppRuntime().gamesClient;
+}
+
+export function usePlayersClient(): PlayersClient {
+  return useAppRuntime().playersClient;
+}
+
 export function useLiveClient(): LiveClient {
   return useAppRuntime().live;
+}
+
+export function useClock(): Clock {
+  return useAppRuntime().clock;
+}
+
+export function useMotionPreference(): MotionPreference {
+  return useAppRuntime().motion;
 }

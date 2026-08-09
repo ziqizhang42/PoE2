@@ -17,32 +17,21 @@
     "vscode": {
       "extensions": ["TypeScriptTeam.native-preview", "oxc.oxc-vscode", "vitest.explorer"],
       "settings": {
-        // typescript@7 is the native (Go) compiler: it ships no tsserver.js, so
-        // VS Code's built-in language service cannot run it and `typescript.tsdk`
-        // does not apply. useTsgo stands the built-in server down and hands
-        // TypeScript to the native-preview extension, which is pointed at the
-        // workspace compiler (the package dir, not lib/) so the editor and
-        // `pnpm check` run the same version. That resolution depends on
-        // publicHoistPattern in pnpm-workspace.yaml.
+        // TypeScript 7 uses native-preview with the workspace compiler; its
+        // platform package is hoisted by pnpm-workspace.yaml.
         "js/ts.experimental.useTsgo": true,
         "js/ts.tsdk.path": "./node_modules/typescript",
 
-        // NodeNext requires the .js extension on relative specifiers. "auto"
-        // already infers this; stating it keeps generated imports correct even
-        // if a package is ever added with different module settings.
+        // Keep NodeNext-generated relative imports on their required .js suffix.
         "js/ts.preferences.importModuleSpecifierEnding": "js",
 
-        // oxfmt owns formatting, and `pnpm check` runs format:check first - so
-        // without format-on-save the editor drifts from CI. oxc.enable.oxlint
-        // and oxc.enable.oxfmt already default to true, so they are not repeated.
         "editor.formatOnSave": true,
         "[typescript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
         "[javascript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
         "[json]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
         "[jsonc]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
 
-        // Build output and dependencies are noise in search and would otherwise
-        // consume file watchers over the bind mount.
+        // Avoid watching generated and dependency trees over the bind mount.
         "files.watcherExclude": {
           "**/node_modules/**": true,
           "**/dist/**": true,

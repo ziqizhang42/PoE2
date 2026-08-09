@@ -1,17 +1,6 @@
-/**
- * The browser WebSocket adapter.
- *
- * It owns framing, authentication, and fan-out. Every rule
- * about who may do what to a game lives in the game service, which this module
- * calls exactly the way any other adapter would.
- *
- * See [docs/protocol.md](../../../docs/protocol.md) for the wire contract.
- */
-
 import { Buffer } from "node:buffer";
 import { clearTimeout, setTimeout } from "node:timers";
 
-import { fastifyCookie } from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import {
   WS_PROTOCOL_VERSION,
@@ -35,15 +24,16 @@ import type { AuthService } from "../auth/service.js";
 import type { AuthConfig } from "../config/auth.js";
 import { isAllowedOrigin, type WebSocketConfig } from "../config/websocket.js";
 import type { GameErrorCode, GameService } from "../game/service.js";
+import { createCommandQueue } from "../limits/command-queue.js";
+import type { ConnectionAdmission } from "../limits/connection-registry.js";
+import type { WebSocketLimits } from "../limits/websocket-limits.js";
+import { clientAddressKey } from "./client-address.js";
+import { readSessionCookie } from "./session.js";
 import { sendMessage, type ConnectionHub } from "./ws-hub.js";
 
 export const WS_ROUTE = "/api/ws";
 
-/**
- * Commands are a few hundred bytes at most. The cap is what stops an
- * authenticated socket from buffering megabytes of frame before anything looks
- * at it; `ws` closes the connection itself once a frame exceeds it.
- */
+/** Bounds memory consumed before a frame is parsed. */
 export const WS_MAX_PAYLOAD_BYTES = 16 * 1024;
 
 /** RFC 6455 "policy violation": used when a socket's session stops being valid. */
@@ -52,6 +42,9 @@ const POLICY_VIOLATION = 1008;
 /** RFC 6455 "internal error": used when the server cannot serve the socket. */
 const INTERNAL_ERROR = 1011;
 
+/** RFC 6455 "try again later": used when a peer outruns its bounded queue. */
+const TRY_AGAIN_LATER = 1013;
+
 /** How long a peer gets to answer a close frame before the socket is dropped. */
 const CLOSE_GRACE_MS = 1_000;
 
@@ -59,66 +52,64 @@ export interface WebSocketHttpOptions extends AuthConfig, WebSocketConfig {
   readonly authService: AuthService;
   readonly gameService: GameService;
   readonly hub: ConnectionHub;
+  readonly limits: WebSocketLimits;
 }
 
-/** What the upgrade established, carried from the auth hook to the handler. */
 interface SocketSession {
   readonly user: AuthUser;
   readonly token: string;
+  readonly address: string;
+  readonly admission: ConnectionAdmission;
 }
 
 const requestIdSchema = z.uuid();
 
-const REJECTION_MESSAGES: Readonly<Record<WsErrorCode, string>> = {
+/** Exhaustive so the adapter cannot omit a shared wire error code. */
+export const REJECTION_MESSAGES: Readonly<Record<WsErrorCode, string>> = {
   invalid_message: "Message did not match the protocol",
   game_not_found: "That game does not exist",
   game_not_waiting: "That game is no longer waiting for an opponent",
   cannot_join_own_game: "You cannot join your own lobby",
   not_lobby_owner: "Only the player who opened a lobby can cancel it",
   not_a_player: "You are not a player in that game",
+  game_not_ready_check: "That game is not waiting for both players to confirm",
   not_your_turn: "It is not your turn",
   stale_game: "The game has moved on since that revision",
   occupied: "That square is already taken",
   game_over: "That game has already finished",
+  lobby_already_open: "You already have a lobby waiting for an opponent",
+  rated_requires_clock: "A rated game needs a clock; choose a time control or open a casual game",
+  rate_limited: "Too many commands; slow down and try again",
   internal_error: "The command could not be processed",
 };
 
-/**
- * The service reports domain decisions in its own vocabulary; only this table
- * turns them into wire codes. `invalid_square` cannot reach a browser, because
- * the schema bounds coordinates before the service is called.
- */
 const WS_ERROR_BY_GAME_ERROR: Readonly<Record<GameErrorCode, WsErrorCode>> = {
   game_not_found: "game_not_found",
   game_not_waiting: "game_not_waiting",
   cannot_join_own_game: "cannot_join_own_game",
   not_lobby_owner: "not_lobby_owner",
   not_a_player: "not_a_player",
+  game_not_ready_check: "game_not_ready_check",
   not_your_turn: "not_your_turn",
   stale_game: "stale_game",
   occupied: "occupied",
   game_over: "game_over",
+  lobby_already_open: "lobby_already_open",
+  rated_requires_clock: "rated_requires_clock",
+  deadline_capacity: "rate_limited",
   invalid_square: "invalid_message",
 };
 
 const webSocketRoutes: FastifyPluginAsync<WebSocketHttpOptions> = async (app, options) => {
-  // Keyed by the request object, which is the same instance in the hook and in
-  // the handler. Nothing outside one upgrade can reach the session.
   const sessions = new WeakMap<FastifyRequest, SocketSession>();
 
   app.get(
     WS_ROUTE,
     {
       websocket: true,
-      /**
-       * Runs before the upgrade completes, so an unauthenticated or
-       * cross-origin caller gets an HTTP status and never a socket. The user is
-       * taken from the session cookie; the client cannot name one.
-       */
+      /** Rejects unauthenticated and cross-origin callers before the upgrade. */
       onRequest: async (request, reply) => {
-        // The auth plugin's error handler is encapsulated in its own scope, so
-        // an unexpected failure here would otherwise reach Fastify's default
-        // handler and put the internal message on the wire.
+        // Keep unexpected authentication details out of Fastify's default response.
         try {
           if (!isAllowedOrigin(options, request.headers.origin)) {
             return reply.code(403).send({ code: "forbidden_origin" });
@@ -134,7 +125,19 @@ const webSocketRoutes: FastifyPluginAsync<WebSocketHttpOptions> = async (app, op
             return reply.code(401).send({ code: "unauthenticated" });
           }
 
-          sessions.set(request, { user, token });
+          // Reserve synchronously so concurrent upgrades cannot pass the same count.
+          // Unclaimed reservations expire if the upgrade never reaches its handler.
+          const address = clientAddressKey(request);
+          const admission = await options.limits.connections.admit({
+            userId: user.id,
+            address,
+          });
+
+          if (admission === null) {
+            return reply.code(429).send({ code: "too_many_connections" });
+          }
+
+          sessions.set(request, { user, token, address, admission });
           return undefined;
         } catch (error) {
           request.log.error({ err: error }, "websocket upgrade failed unexpectedly");
@@ -146,9 +149,12 @@ const webSocketRoutes: FastifyPluginAsync<WebSocketHttpOptions> = async (app, op
       const session = sessions.get(request);
 
       if (session === undefined) {
-        // Unreachable while the hook above runs, and a closed socket is the
-        // only safe response if it ever became reachable.
         closeSocket(socket, POLICY_VIOLATION, "unauthenticated");
+        return;
+      }
+
+      if (!session.admission.claim()) {
+        closeSocket(socket, TRY_AGAIN_LATER, "connection admission expired");
         return;
       }
 
@@ -157,13 +163,7 @@ const webSocketRoutes: FastifyPluginAsync<WebSocketHttpOptions> = async (app, op
   );
 };
 
-/**
- * Registers the WebSocket transport on `app`.
- *
- * `@fastify/websocket` must be registered before any route it serves, and it is
- * registered directly on `app` rather than inside the route plugin so that the
- * `injectWS` test helper it decorates lands on the instance callers hold.
- */
+/** Registers the websocket plugin before its route, preserving `injectWS` on `app`. */
 export async function registerWebSocket(
   app: FastifyInstance,
   options: WebSocketHttpOptions,
@@ -183,34 +183,33 @@ function handleConnection(
 ): void {
   const { hub, gameService } = options;
 
-  // Pending until the opening sequence has been sent: hub traffic from other
-  // users buffers behind it rather than arriving before `session.ready`.
+  // Buffer hub traffic until the opening sequence has been sent.
   hub.add(session.user.id, socket);
 
-  /** Set when the connection is given up on, so queued frames stop early. */
   let abandoned = false;
 
-  /**
-   * One command at a time, in arrival order. Handlers await the database, so
-   * without this a second frame could overtake the first and, for example, be
-   * validated against a revision its predecessor has not yet consumed.
-   */
-  let queue: Promise<void> = Promise.resolve();
-  const enqueue = (work: () => Promise<void>): void => {
-    queue = queue.then(work).catch((error: unknown) => {
+  const queue = createCommandQueue({
+    maxDepth: options.limits.maxPendingCommands,
+    onError: (error: unknown) => {
       log.error({ err: error }, "websocket work failed outside command handling");
-    });
-  };
+    },
+  });
 
-  // Attached synchronously: a frame that arrives before the initial state has
-  // been sent must still be queued behind it rather than dropped.
+  // Attach before asynchronous opening reads so early frames queue behind them.
   socket.on("message", (data: RawData, isBinary: boolean) => {
-    enqueue(async () => {
+    const accepted = queue.enqueue(async () => {
       if (abandoned) {
         return;
       }
       await handleFrame(socket, session, log, options, data, isBinary);
     });
+
+    if (!accepted && !abandoned) {
+      // Queue-overflow replies would bypass command budgets, so shed the connection.
+      abandoned = true;
+      hub.remove(session.user.id, socket);
+      closeSocket(socket, TRY_AGAIN_LATER, "command backlog exceeded");
+    }
   });
 
   socket.on("error", (error: Error) => {
@@ -219,9 +218,10 @@ function handleConnection(
 
   socket.on("close", () => {
     hub.remove(session.user.id, socket);
+    session.admission.release();
   });
 
-  enqueue(async () => {
+  queue.enqueue(async () => {
     try {
       sendMessage(socket, {
         type: "session.ready",
@@ -237,10 +237,11 @@ function handleConnection(
       for (const game of await gameService.listOpenGames(session.user.id)) {
         sendMessage(socket, { type: "game.snapshot", game });
       }
+
+      // Only this marker means the opening state is complete.
+      sendMessage(socket, { type: "session.synced" });
     } catch (error) {
-      // A client that never learned its own state must not go on issuing
-      // commands against it, so the connection is given up rather than left
-      // half-initialized.
+      // Do not leave a half-initialized client able to issue commands.
       log.error({ err: error }, "websocket opening sequence failed");
       abandoned = true;
       hub.remove(session.user.id, socket);
@@ -260,40 +261,32 @@ async function handleFrame(
   data: RawData,
   isBinary: boolean,
 ): Promise<void> {
-  const reject = (requestId: string | null, code: WsErrorCode): void => {
-    sendMessage(socket, {
-      type: "command.rejected",
-      requestId,
-      code,
-      message: REJECTION_MESSAGES[code],
-    });
-  };
+  // Parse first so even throttled requests can be correlated.
+  const frame = readFrame(data, isBinary);
+  const requestId = frame.ok ? recoverRequestId(frame.payload) : null;
 
-  // The identity is re-derived per command rather than trusted for the life of
-  // the socket, so logging out or letting a session expire ends the connection
-  // instead of leaving a long-lived authenticated channel behind.
+  // Charge before session I/O, including malformed frames, to bound database work.
+  const budget = await spendCommandBudget(session, options.limits);
+  if (!budget.allowed) {
+    reject(socket, requestId, "rate_limited");
+    return;
+  }
+
+  if (!frame.ok) {
+    reject(socket, requestId, "invalid_message");
+    return;
+  }
+
+  // Revalidate per command so logout and expiry end the authenticated channel.
   const actor = await options.authService.authenticateSession(session.token);
   if (actor === null) {
     closeSocket(socket, POLICY_VIOLATION, "session is no longer valid");
     return;
   }
 
-  if (isBinary) {
-    reject(null, "invalid_message");
-    return;
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(frameText(data));
-  } catch {
-    reject(null, "invalid_message");
-    return;
-  }
-
-  const parsed = WsClientMessageSchema.safeParse(payload);
+  const parsed = WsClientMessageSchema.safeParse(frame.payload);
   if (!parsed.success) {
-    reject(recoverRequestId(payload), "invalid_message");
+    reject(socket, requestId, "invalid_message");
     return;
   }
 
@@ -304,20 +297,25 @@ async function handleFrame(
     outcome = await runCommand(actor, options, message);
   } catch (error) {
     log.error({ err: error, command: message.type }, "websocket command failed unexpectedly");
-    reject(message.requestId, "internal_error");
+    reject(socket, message.requestId, "internal_error");
     return;
   }
 
   if (!outcome.ok) {
-    reject(message.requestId, WS_ERROR_BY_GAME_ERROR[outcome.code]);
+    reject(socket, message.requestId, WS_ERROR_BY_GAME_ERROR[outcome.code]);
+    if (outcome.publish !== undefined) {
+      try {
+        await outcome.publish();
+      } catch (error) {
+        log.error({ err: error, command: message.type }, "websocket fan-out failed after timeout");
+      }
+    }
     return;
   }
 
   sendMessage(socket, { type: "command.accepted", requestId: message.requestId });
 
-  // The change is committed and the command has been acknowledged. A failure
-  // publishing it must never be turned into a rejection of a command that
-  // actually succeeded; the next snapshot any client receives corrects them.
+  // Fan-out happens after acknowledgement and cannot reverse a committed command.
   try {
     await outcome.publish();
   } catch (error) {
@@ -325,15 +323,46 @@ async function handleFrame(
   }
 }
 
-/**
- * A command's outcome, with the fan-out held back as `publish`.
- *
- * Splitting them is what keeps acknowledgement honest: everything that can
- * still refuse the command happens before it is acknowledged, and everything
- * after acknowledgement is notification that may only be logged.
- */
+function reject(socket: WebSocket, requestId: string | null, code: WsErrorCode): void {
+  sendMessage(socket, {
+    type: "command.rejected",
+    requestId,
+    code,
+    message: REJECTION_MESSAGES[code],
+  });
+}
+
+type ReadFrame = { readonly ok: true; readonly payload: unknown } | { readonly ok: false };
+
+function readFrame(data: RawData, isBinary: boolean): ReadFrame {
+  if (isBinary) {
+    return { ok: false };
+  }
+
+  try {
+    return { ok: true, payload: JSON.parse(frameText(data)) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Charges account first, then address; a later refusal does not refund either. */
+async function spendCommandBudget(
+  session: SocketSession,
+  limits: WebSocketLimits,
+): Promise<{ readonly allowed: boolean }> {
+  const user = await limits.userCommands.consume(session.user.id);
+
+  if (!user.allowed) {
+    return user;
+  }
+
+  return limits.addressCommands.consume(session.address);
+}
+
+/** Separates the decision from best-effort post-acknowledgement fan-out. */
 type CommandOutcome =
-  | { readonly ok: false; readonly code: GameErrorCode }
+  | { readonly ok: false; readonly code: GameErrorCode; readonly publish?: () => Promise<void> }
   | { readonly ok: true; readonly publish: () => Promise<void> };
 
 async function runCommand(
@@ -347,6 +376,16 @@ async function runCommand(
     hub.broadcast({ type: "lobby.snapshot", lobbies: await gameService.listWaitingLobbies() });
   };
 
+  /** Fan-out for a reopened lobby whose released player is absent from its snapshot. */
+  const publishAbandonedCheck = async (
+    game: GameSnapshot,
+    releasedPlayerId: string,
+  ): Promise<void> => {
+    hub.send(game.players.playerOne.id, { type: "game.snapshot", game });
+    hub.send(releasedPlayerId, { type: "game.closed", gameId: game.id });
+    await broadcastLobbies();
+  };
+
   const sendGameToPlayers = (game: GameSnapshot): void => {
     const snapshot: WsServerMessage = { type: "game.snapshot", game };
     for (const userId of participantIds(game)) {
@@ -356,9 +395,23 @@ async function runCommand(
 
   switch (message.type) {
     case "lobby.create": {
-      const result = await gameService.createGame(actor.id);
+      const result = await gameService.createGame({
+        actorId: actor.id,
+        rated: message.rated,
+        timeControl: message.timeControl,
+        creatorSeat: message.creatorSeat,
+      });
       if (!result.ok) {
-        return { ok: false, code: result.code };
+        return result.committed === undefined
+          ? { ok: false, code: result.code }
+          : {
+              ok: false,
+              code: result.code,
+              publish: () => {
+                sendGameToPlayers(result.committed as GameSnapshot);
+                return Promise.resolve();
+              },
+            };
       }
 
       return {
@@ -373,7 +426,16 @@ async function runCommand(
     case "lobby.join": {
       const result = await gameService.joinGame({ actorId: actor.id, gameId: message.gameId });
       if (!result.ok) {
-        return { ok: false, code: result.code };
+        return result.committed === undefined
+          ? { ok: false, code: result.code }
+          : {
+              ok: false,
+              code: result.code,
+              publish: () => {
+                sendGameToPlayers(result.committed as GameSnapshot);
+                return Promise.resolve();
+              },
+            };
       }
 
       return {
@@ -381,6 +443,43 @@ async function runCommand(
         publish: async () => {
           sendGameToPlayers(result.value);
           await broadcastLobbies();
+        },
+      };
+    }
+
+    case "game.ready": {
+      const result = await gameService.readyGame({
+        actorId: actor.id,
+        gameId: message.gameId,
+        readyCheckGeneration: message.readyCheckGeneration,
+      });
+      if (!result.ok) {
+        return { ok: false, code: result.code };
+      }
+
+      return {
+        ok: true,
+        publish: () => {
+          sendGameToPlayers(result.value);
+          return Promise.resolve();
+        },
+      };
+    }
+
+    case "game.decline": {
+      const result = await gameService.declineGame({
+        actorId: actor.id,
+        gameId: message.gameId,
+        readyCheckGeneration: message.readyCheckGeneration,
+      });
+      if (!result.ok) {
+        return { ok: false, code: result.code };
+      }
+
+      return {
+        ok: true,
+        publish: async () => {
+          await publishAbandonedCheck(result.value.game, result.value.releasedPlayerId);
         },
       };
     }
@@ -409,7 +508,47 @@ async function runCommand(
       });
 
       if (!result.ok) {
-        return { ok: false, code: result.code };
+        const committed = result.committed;
+        return committed === undefined
+          ? { ok: false, code: result.code }
+          : {
+              ok: false,
+              code: result.code,
+              publish: () => {
+                sendGameToPlayers(committed);
+                return Promise.resolve();
+              },
+            };
+      }
+
+      return {
+        ok: true,
+        publish: () => {
+          sendGameToPlayers(result.value);
+          return Promise.resolve();
+        },
+      };
+    }
+
+    case "game.resign": {
+      const result = await gameService.resignGame({
+        actorId: actor.id,
+        gameId: message.gameId,
+        expectedRevision: message.expectedRevision,
+      });
+
+      if (!result.ok) {
+        const committed = result.committed;
+        return committed === undefined
+          ? { ok: false, code: result.code }
+          : {
+              ok: false,
+              code: result.code,
+              publish: () => {
+                sendGameToPlayers(committed);
+                return Promise.resolve();
+              },
+            };
       }
 
       return {
@@ -423,13 +562,7 @@ async function runCommand(
   }
 }
 
-/**
- * Ends a connection the server has decided it may no longer serve.
- *
- * The close frame is sent first so the peer learns why, but a peer that never
- * answers it would otherwise hold the socket - and its hub entry - open for
- * good, so the transport is dropped once the grace period lapses.
- */
+/** Sends a close frame, then drops peers that outlive the grace period. */
 function closeSocket(socket: WebSocket, code: number, reason: string): void {
   socket.close(code, reason);
 
@@ -455,11 +588,7 @@ function frameText(data: RawData): string {
   return Buffer.from(data).toString("utf8");
 }
 
-/**
- * Correlates a rejection with the frame that caused it when the frame is
- * malformed but still names a plausible request. Anything else is answered with
- * a null request ID rather than an echo of untrusted input.
- */
+/** Recovers only a valid UUID for correlating malformed requests. */
 function recoverRequestId(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return null;
@@ -469,17 +598,4 @@ function recoverRequestId(payload: unknown): string | null {
   const parsed = requestIdSchema.safeParse(candidate);
 
   return parsed.success ? parsed.data : null;
-}
-
-function readSessionCookie(request: FastifyRequest, cookieName: string): string | null {
-  const header = request.headers.cookie;
-  if (header === undefined) {
-    return null;
-  }
-
-  // Parsed straight from the header: `@fastify/cookie` is registered inside the
-  // auth plugin's scope, so `request.cookies` does not exist here.
-  const token = fastifyCookie.parse(header)[cookieName];
-
-  return token === undefined || token.length === 0 ? null : token;
 }

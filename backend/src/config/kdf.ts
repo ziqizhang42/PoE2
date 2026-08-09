@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { KdfExecutorOptions } from "../auth/kdf-executor.js";
+import { boundedInteger } from "./bounded-integer.js";
 
 /**
  * Two concurrent Argon2 operations put current-policy hashing at ~128 MiB of
@@ -22,16 +23,6 @@ export const DEFAULT_KDF_MAX_QUEUED = 16;
 
 const MAX_KDF_MAX_CONCURRENT = 64;
 const MAX_KDF_MAX_QUEUED = 1_024;
-
-function boundedInteger(minimum: number, maximum: number, fallback: number) {
-  return z
-    .string()
-    .trim()
-    .regex(/^\d+$/u, "must be a whole number")
-    .transform(Number)
-    .pipe(z.number().int().min(minimum).max(maximum))
-    .default(fallback);
-}
 
 const kdfEnvironmentSchema = z.object({
   PASSWORD_KDF_MAX_CONCURRENT: boundedInteger(

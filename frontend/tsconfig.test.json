@@ -12,7 +12,10 @@
     "tsBuildInfoFile": "../node_modules/.cache/frontend.test.tsbuildinfo",
     "types": ["vite/client"]
   },
-  "references": [{ "path": "../packages/protocol/tsconfig.build.json" }],
+  "references": [
+    { "path": "../packages/protocol/tsconfig.build.json" },
+    { "path": "../packages/rules/tsconfig.build.json" }
+  ],
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["dist"]
 }

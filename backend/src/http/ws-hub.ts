@@ -1,14 +1,6 @@
 /**
- * In-memory registry of live sockets, keyed by authenticated user ID.
- *
- * It holds connections and nothing else. No game, lobby, or turn ever lives
- * here: losing the whole hub costs open sockets, never state, because
- * PostgreSQL remains the only authority on what a game is.
- *
- * A connection is added in a pending state and buffers everything addressed to
- * it until `activate` is called. That window is what lets a caller send an
- * opening sequence in a guaranteed order without another user's broadcast
- * landing in the middle of it.
+ * In-memory sockets only. Pending connections buffer broadcasts until activation
+ * so the opening sequence remains ordered; PostgreSQL remains authoritative.
  */
 
 import type { WsServerMessage } from "@poe2/protocol";

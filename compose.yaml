@@ -92,16 +92,11 @@ services:
       NODE_ENV: development
       HOST: "0.0.0.0"
       PORT: "3000"
-      # Exactly one hop: the Vite container in the `frontend` service. Fastify
-      # skips that hop and uses the address Vite appended, so a client-supplied
-      # x-forwarded-for entry sent through Vite is discarded. The hop count is
-      # positional, so whatever opens the socket is still trusted; the published
-      # port below is loopback-only for that reason.
+      # Vite is the single trusted positional hop. Keep the published backend
+      # port loopback-only because a direct caller could forge forwarding headers.
       TRUST_PROXY_HOPS: "1"
-      # The only browser origin allowed to open /api/ws. A WebSocket upgrade
-      # ignores the same-origin policy but still sends the session cookie, so
-      # this list is what keeps another page from opening an authenticated
-      # socket. There is no wildcard, and production must set it explicitly.
+      # WebSocket upgrades include cookies without same-origin protection, so
+      # allow only the Vite browser origin. Production must set this explicitly.
       WEBSOCKET_ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
       DATABASE_URL: postgresql://poe2_dev:poe2_dev@db:5432/poe2_dev
     ports:

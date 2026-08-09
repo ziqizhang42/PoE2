@@ -1,10 +1,3 @@
-/**
- * The UI-facing view of the live connection.
- *
- * Every selector returns a value the store already holds, so nothing here
- * derives, sorts, or recomputes game state on render.
- */
-
 import type { GameSnapshot, LobbyEntry } from "@poe2/protocol";
 import { useStore } from "zustand";
 
@@ -32,8 +25,18 @@ export function useGames(): readonly GameSnapshot[] {
   return useLiveState((state) => state.games);
 }
 
+export function useLiveSynced(): boolean {
+  return useLiveState((state) => state.synced);
+}
+
 export function useGame(gameId: string): GameSnapshot | null {
   return useLiveState((state) => state.games.find((game) => game.id === gameId) ?? null);
+}
+
+export function useGameReceivedAtMs(gameId: string | null): number | null {
+  return useLiveState((state) =>
+    gameId === null ? null : (state.gameReceivedAtMs[gameId] ?? null),
+  );
 }
 
 export function useLastLiveRejection(): LiveRejection | null {

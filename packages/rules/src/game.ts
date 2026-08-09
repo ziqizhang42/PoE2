@@ -1,14 +1,3 @@
-/**
- * Game state for Powers of Exponent 2.
- *
- * A game stores its board and move history. Ply, side to move, and completion
- * are derived rather than stored separately. Games start empty with Player 1
- * to move and end after exactly 49 accepted moves.
- *
- * Transitions are pure: accepted moves return new state, while rejected moves
- * return the original state unchanged.
- */
-
 import {
   allSquares,
   createEmptyBoard,
@@ -24,16 +13,15 @@ import type { MoveError } from "./move.js";
 import { resultIfFull } from "./score.js";
 import type { GameResult } from "./score.js";
 
+/** Canonical board and move history; ply, turn, and completion are derived. */
 export interface Game {
   readonly board: Board;
   readonly moves: readonly Square[];
 }
 
-/** The outcome of offering a move to a game. */
 export type MoveResult =
   | {
       readonly accepted: true;
-      /** The new game. */
       readonly game: Game;
       /** The terminal result when this move filled the board, else `null`. */
       readonly result: GameResult | null;
@@ -47,7 +35,6 @@ export type MoveResult =
       readonly result: GameResult | null;
     };
 
-/** The outcome of replaying a move sequence from an empty board. */
 export type ReplayResult =
   | { readonly ok: true; readonly game: Game }
   | {

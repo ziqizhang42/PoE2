@@ -1,15 +1,3 @@
-/**
- * Scoring for Powers of Exponent 2.
- *
- * Scores are always recalculated from the board contents. Each maximal
- * contiguous run of length >= 2 is emitted exactly once per direction and
- * scores `2^(length - 1)`. A piece that belongs to no such run in any direction
- * scores one point; a piece in any run never also counts as a singleton.
- *
- * Player 2's handicap is held in half-points so winner comparisons stay exact
- * integer arithmetic and never touch floating point.
- */
-
 import {
   BOARD_SIZE,
   CELL_COUNT,
@@ -59,7 +47,6 @@ export interface Run {
   /** Members in scan order, from the end of the run the scan started at. */
   readonly squares: readonly Square[];
   readonly length: number;
-  /** `lineScore(length)`. */
   readonly value: number;
 }
 

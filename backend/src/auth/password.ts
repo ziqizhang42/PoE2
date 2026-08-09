@@ -36,23 +36,10 @@ const PARAMETER_BOUNDS = {
 const PARAMETER_NUMBER_PATTERN = /^(?:0|[1-9]\d{0,8})$/u;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+$/u;
 
-/**
- * `password_hash` is an unbounded `text` column, so a corrupt or tampered row
- * could hold megabytes of otherwise alphabet-valid base64. Length is therefore
- * checked before anything is decoded, because `Buffer.from` would allocate the
- * whole field first and only then meet the salt and tag byte bounds.
- *
- * A canonical hash is a little over 100 characters; the ceiling is generous
- * enough for any policy inside {@link PARAMETER_BOUNDS} and still caps decoding
- * at a few hundred bytes.
- */
+/** Caps allocation before base64 decoding; 256 covers every accepted policy. */
 const MAX_ENCODED_HASH_LENGTH = 256;
 
-/**
- * `$argon2id$v=<version>$m=<memory>,t=<passes>,p=<parallelism>$<salt>$<tag>`,
- * anchored so no trailing `$`-separated field can be smuggled in. Numeric
- * ranges are checked separately, after the shape matches.
- */
+/** Strict PHC shape; parameter ranges are validated separately. */
 const PHC_PATTERN = /^\$argon2id\$v=([^$,]+)\$m=([^$,]+),t=([^$,]+),p=([^$,]+)\$([^$]+)\$([^$]+)$/u;
 
 export interface PasswordPolicy {
@@ -64,20 +51,14 @@ export interface PasswordPolicy {
 }
 
 /**
- * `unusable_hash` is kept distinct from `mismatch` on purpose. It means the
- * stored value could not be parsed at all, which is a corrupt or tampered row
- * rather than a wrong password, and it costs no Argon2 work so the caller has
- * to both report it and make up the missing work itself.
+ * `unusable_hash` identifies an untrusted stored value rejected before Argon2;
+ * callers must report it and equalize the missing work.
  */
 export type PasswordVerification =
   | { readonly outcome: "verified"; readonly needsRehash: boolean }
   | {
       readonly outcome: "mismatch";
-      /**
-       * False when the hash was stored under some older, cheaper policy, which
-       * means this rejection cost less Argon2 work than one against a
-       * current-policy hash. The caller has to even that out.
-       */
+      /** False means the caller must add current-policy work before rejecting. */
       readonly storedPolicyIsCurrent: boolean;
     }
   | { readonly outcome: "unusable_hash" };
@@ -87,10 +68,7 @@ export interface PasswordHasher {
   verify(password: string, encodedHash: string): Promise<PasswordVerification>;
 }
 
-/**
- * Builds a hasher whose Argon2 work all flows through `executor`, so the number
- * of simultaneous derivations is bounded no matter how many requests arrive.
- */
+/** Routes every derivation through the injected concurrency bound. */
 export function createPasswordHasher(executor: KdfExecutor): PasswordHasher {
   return {
     hash(password) {
@@ -105,8 +83,7 @@ export function createPasswordHasher(executor: KdfExecutor): PasswordHasher {
     async verify(password, encodedHash) {
       const stored = parsePasswordHash(encodedHash);
       if (stored === null) {
-        // Malformed, unsupported, or out-of-bounds: rejected without ever
-        // handing the stored parameters to Argon2.
+        // Reject malformed, unsupported, or out-of-bounds parameters before Argon2.
         return { outcome: "unusable_hash" };
       }
 
@@ -130,10 +107,8 @@ interface ParsedPasswordHash {
   readonly tag: Buffer;
 }
 
-/** Exported for tests; production code goes through {@link PasswordHasher}. */
 export function parsePasswordHash(encodedHash: string): ParsedPasswordHash | null {
-  // Before the regex and before any decoding, so an oversized stored value is
-  // rejected without allocating decoded buffers.
+  // Check before parsing or decoding to bound allocation from untrusted input.
   if (encodedHash.length > MAX_ENCODED_HASH_LENGTH) {
     return null;
   }
@@ -157,9 +132,7 @@ export function parsePasswordHash(encodedHash: string): ParsedPasswordHash | nul
     return null;
   }
 
-  // Argon2's own floor. The bounds above already guarantee it, but keeping the
-  // check means a future bound change degrades to a clean rejection rather than
-  // a thrown error from the crypto layer.
+  // Preserve Argon2's floor if the accepted bounds change later.
   if (memoryKiB < 8 * parallelism) {
     return null;
   }
@@ -186,14 +159,12 @@ export function parsePasswordHash(encodedHash: string): ParsedPasswordHash | nul
   };
 }
 
-/** Exported for tests, which need to produce hashes under an older policy. */
 export function encodePasswordHash(policy: PasswordPolicy, salt: Buffer, tag: Buffer): string {
   const parameters = `m=${policy.memoryKiB},t=${policy.passes},p=${policy.parallelism}`;
 
   return `$argon2id$v=${ARGON2_VERSION}$${parameters}$${encodeBase64(salt)}$${encodeBase64(tag)}`;
 }
 
-/** Exported for tests, which need to produce hashes under an older policy. */
 export function derivePassword(
   password: string,
   salt: Buffer,

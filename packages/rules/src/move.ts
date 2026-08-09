@@ -1,15 +1,3 @@
-/**
- * Move notation and legality for Powers of Exponent 2.
- *
- * Notation is `a1` through `g7`: the file letter is the column and the rank
- * digit is the row, so `a1` is `{ row: 0, col: 0 }` and `g7` is
- * `{ row: 6, col: 6 }`. Parsing accepts an uppercase file; formatting always
- * emits lowercase.
- *
- * The state transition itself lives in `game.ts`; everything here is a pure
- * function of a board and a square.
- */
-
 import { BOARD_SIZE, isBoardFull, isEmptySquare, isValidSquare } from "./board.js";
 import type { Board, Square } from "./board.js";
 
