@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # The workspace's /pnpm/store is a Docker volume; CI needs a runner-owned path.
+  PNPM_CONFIG_STORE_DIR: .pnpm-store
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
