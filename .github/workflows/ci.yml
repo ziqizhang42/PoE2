@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@v2
+        with:
+          runtime: node@26
+          cache: true
+          install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting, lint, types, and unit tests
+        run: pnpm run check
+
+      - name: Build all packages
+        run: pnpm run build
+
+  integration:
+    name: Database integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://poe2_test:poe2_test@localhost:5432/poe2_test
+      TEST_DATABASE_URL: postgresql://poe2_test:poe2_test@localhost:5432/poe2_test
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: poe2_test
+          POSTGRES_USER: poe2_test
+          POSTGRES_PASSWORD: poe2_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U poe2_test -d poe2_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@v2
+        with:
+          runtime: node@26
+          cache: true
+          install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate database migrations
+        run: pnpm --filter @poe2/backend run db:check
+
+      - name: Run database integration tests
+        run: pnpm run test:integration

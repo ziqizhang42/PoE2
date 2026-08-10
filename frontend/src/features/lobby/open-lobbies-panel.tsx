@@ -3,7 +3,7 @@ import { PLAYER_ONE } from "@poe2/rules";
 
 import { Button } from "../../ui/button.tsx";
 import { PlayerLink } from "../../players/player-link.tsx";
-import { CARD, CARD_TITLE, HINT, NOTE, TABLE, TABLE_SCROLL, TD, TH } from "../../ui/classes.ts";
+import { CARD, CARD_TITLE, NOTE, TABLE, TABLE_SCROLL, TD, TH } from "../../ui/classes.ts";
 import { joinKey } from "./command-keys.ts";
 import { formatOpenedAt } from "./games.ts";
 import { formatTimeControl } from "../time-control.ts";
@@ -101,7 +101,6 @@ export function OpenLobbiesPanel({
           </table>
         </div>
       )}
-
     </section>
   );
 }
