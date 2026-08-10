@@ -2,12 +2,14 @@ import {
   GameHistoryPageSchema,
   HISTORY_PAGE_LIMIT,
   normalizeUsername,
+  PlayerDirectorySchema,
   PublicPlayerProfileSchema,
 } from "@poe2/protocol";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
+import type { AuthService } from "../auth/service.js";
 import { readDatabaseConfig } from "../config/database.js";
 import { createDatabaseClient } from "../db/client.js";
 import { games, ratingEvents, users } from "../db/schema.js";
@@ -19,6 +21,8 @@ import { createRatingReader } from "../rating/reader.js";
 import { playersPlugin } from "./players.js";
 
 const database = createDatabaseClient(readDatabaseConfig(process.env));
+let aliceId = "";
+let bobId = "";
 const consumedKeys: string[] = [];
 let refuse = false;
 const limiter: RateLimiter = {
@@ -29,25 +33,47 @@ const limiter: RateLimiter = {
     );
   },
 };
+const directoryConsumedKeys: string[] = [];
+let refuseDirectory = false;
+const directoryLimiter: RateLimiter = {
+  consume(key) {
+    directoryConsumedKeys.push(key);
+    return Promise.resolve(
+      refuseDirectory
+        ? { allowed: false, retryAfterMs: 1_500 }
+        : { allowed: true, retryAfterMs: 0 },
+    );
+  },
+};
+
+const sessionService: AuthService = {
+  register: async () => ({ ok: false, code: "username_taken" }),
+  login: async () => ({ ok: false, code: "invalid_credentials" }),
+  authenticateSession: async (token) =>
+    token === "valid-session" && aliceId.length > 0 ? { id: aliceId, username: "Alice_One" } : null,
+  logout: async () => {},
+};
 
 const app = buildApp({ trustProxy: 1 });
+const playerRepository = createPlayerRepository(database.db);
 app.register(playersPlugin, {
-  repository: createPlayerRepository(database.db),
+  repository: playerRepository,
   historyService: createHistoryService(
     createGameRepository(database.db),
     createRatingReader(database.db),
   ),
+  session: { sessionCookieName: "test_session", authService: sessionService },
+  directoryLimiter,
   readLimiter: limiter,
   historyLimiter: unlimited,
 });
 await app.ready();
 
-let aliceId = "";
-let bobId = "";
-
 beforeEach(async () => {
   refuse = false;
+  refuseDirectory = false;
   consumedKeys.length = 0;
+  directoryConsumedKeys.length = 0;
   await database.db.delete(users);
 
   const inserted = await database.db
@@ -131,6 +157,155 @@ beforeEach(async () => {
 afterAll(async () => {
   await app.close();
   await database.close();
+});
+
+describe("GET /api/players", () => {
+  const requestDirectory = (cookie = "test_session=valid-session") =>
+    app.inject({ method: "GET", url: "/api/players", headers: { cookie } });
+
+  it("requires a valid session before it reads or spends directory capacity", async () => {
+    const missing = await app.inject({ method: "GET", url: "/api/players" });
+    const invalid = await requestDirectory("test_session=invalid");
+
+    expect(missing.statusCode).toBe(401);
+    expect(invalid.statusCode).toBe(401);
+    expect(missing.json()).toEqual({ code: "unauthenticated", message: "Authentication required" });
+    expect(directoryConsumedKeys).toEqual([]);
+
+    const valid = await requestDirectory();
+    expect(valid.statusCode).toBe(200);
+    expect(PlayerDirectorySchema.safeParse(valid.json()).success).toBe(true);
+  });
+
+  it("sorts by rounded rating and then username, while fixing unrated display at 1500", async () => {
+    await database.db
+      .update(users)
+      .set({ rating: 1_900, ratedGamesPlayed: 0 })
+      .where(eq(users.id, bobId));
+    await database.db.insert(users).values([
+      {
+        username: "Zoe_Rated",
+        normalizedUsername: "zoe_rated",
+        passwordHash: "private-zoe",
+        rating: 1_600.1,
+        ratedGamesPlayed: 1,
+      },
+      {
+        username: "Amy_Rated",
+        normalizedUsername: "amy_rated",
+        passwordHash: "private-amy",
+        rating: 1_599.6,
+        ratedGamesPlayed: 1,
+      },
+    ]);
+
+    const directory = PlayerDirectorySchema.parse((await requestDirectory()).json());
+
+    expect(directory.map((player) => [player.username, player.rating])).toEqual([
+      ["Amy_Rated", 1600],
+      ["Zoe_Rated", 1600],
+      ["Alice_One", 1513],
+      ["Bob_Two", 1500],
+    ]);
+  });
+
+  it("estimates an unrated color at 1500 among rated players", async () => {
+    await database.db
+      .update(users)
+      .set({ rating: 1_400, ratedGamesPlayed: 1 })
+      .where(eq(users.id, aliceId));
+    await database.db.insert(users).values({
+      username: "High_Rated",
+      normalizedUsername: "high_rated",
+      passwordHash: "private-high",
+      rating: 1_600,
+      ratedGamesPlayed: 1,
+    });
+
+    const directory = PlayerDirectorySchema.parse((await requestDirectory()).json());
+    const bob = directory.find((player) => player.id === bobId);
+
+    expect(bob).toMatchObject({ username: "Bob_Two", rating: 1500, colorPercentile: 50 });
+  });
+
+  it("uses the midpoint color when nobody has a rated result", async () => {
+    await database.db.update(users).set({ ratedGamesPlayed: 0 });
+
+    const directory = PlayerDirectorySchema.parse((await requestDirectory()).json());
+
+    expect(directory.map((player) => player.colorPercentile)).toEqual([50, 50]);
+  });
+
+  it("serializes no credential or internal rating fields", async () => {
+    const response = await requestDirectory();
+    const entries = response.json() as readonly Record<string, unknown>[];
+
+    expect(entries.map((entry) => Object.keys(entry).sort())).toEqual([
+      ["colorPercentile", "id", "rating", "username"],
+      ["colorPercentile", "id", "rating", "username"],
+    ]);
+    for (const privateValue of ["not-used-by-this-public-route", "also-private", "0.07"]) {
+      expect(response.body).not.toContain(privateValue);
+    }
+    for (const privateField of ["password", "deviation", "volatility", "ratedGamesPlayed"]) {
+      expect(response.body).not.toContain(privateField);
+    }
+  });
+
+  it("uses an independent proxy-aware read limiter", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/players",
+      remoteAddress: "127.0.0.1",
+      headers: {
+        cookie: "test_session=valid-session",
+        "x-forwarded-for": "203.0.113.77",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(directoryConsumedKeys).toEqual(["203.0.113.77"]);
+    expect(consumedKeys).toEqual([]);
+
+    refuseDirectory = true;
+    const limited = await requestDirectory();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBe("2");
+  });
+
+  it("keeps authoritative activity offline and gives in-game precedence", async () => {
+    const inserted = await database.db
+      .insert(games)
+      .values([
+        { playerOneId: aliceId, creatorId: aliceId, status: "waiting" },
+        {
+          playerOneId: aliceId,
+          playerTwoId: bobId,
+          creatorId: aliceId,
+          status: "active",
+          revision: 1,
+          activatedRevision: 1,
+        },
+      ])
+      .returning({ id: games.id, status: games.status });
+
+    await expect(playerRepository.listPlayerActivities()).resolves.toEqual(
+      [
+        { id: aliceId, activity: "in_game" },
+        { id: bobId, activity: "in_game" },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+
+    const activeId = inserted.find((game) => game.status === "active")?.id;
+    if (activeId === undefined) {
+      throw new Error("expected an active activity fixture");
+    }
+    await database.db.delete(games).where(eq(games.id, activeId));
+
+    await expect(playerRepository.listPlayerActivities()).resolves.toEqual([
+      { id: aliceId, activity: "open_room" },
+    ]);
+  });
 });
 
 describe("GET /api/players/:username", () => {

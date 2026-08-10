@@ -7,7 +7,7 @@ import { createGamesClient, type GamesClient } from "../games/client.ts";
 import { GAMES_QUERY_ROOT } from "../games/query-keys.ts";
 import { createLiveClient, type LiveClientFactory } from "../live/client.ts";
 import { createPlayersClient, type PlayersClient } from "../players/client.ts";
-import { PLAYER_QUERY_ROOT } from "../players/query-keys.ts";
+import { PLAYER_DIRECTORY_KEY, PLAYER_QUERY_ROOT } from "../players/query-keys.ts";
 import { browserMotionPreference, type MotionPreference } from "../theme/motion.ts";
 import { browserClock, type Clock } from "./clock.ts";
 import type { AppRuntime } from "./context.ts";
@@ -43,6 +43,9 @@ export function createAppRuntime(options: AppRuntimeOptions = {}): AppRuntime {
       void queryClient.invalidateQueries({ queryKey: PLAYER_QUERY_ROOT });
       // A live replay lookup may currently hold the expected pre-finish 404.
       void queryClient.invalidateQueries({ queryKey: GAMES_QUERY_ROOT });
+    },
+    onPlayerDirectoryStale: () => {
+      void queryClient.invalidateQueries({ queryKey: PLAYER_DIRECTORY_KEY, exact: true });
     },
   });
 

@@ -1,8 +1,10 @@
 import {
   GameHistoryPageSchema,
+  PlayerDirectorySchema,
   PlayerErrorResponseSchema,
   PublicPlayerProfileSchema,
   type GameHistoryPage,
+  type PlayerDirectoryEntry,
   type PublicPlayerProfile,
 } from "@poe2/protocol";
 
@@ -29,6 +31,7 @@ export interface PlayerGamesRequest {
 }
 
 export interface PlayersClient {
+  fetchDirectory(signal?: AbortSignal): Promise<readonly PlayerDirectoryEntry[]>;
   fetchProfile(username: string, signal?: AbortSignal): Promise<PublicPlayerProfile>;
   fetchGames(username: string, request?: PlayerGamesRequest): Promise<GameHistoryPage>;
 }
@@ -78,6 +81,11 @@ export function createPlayersClient(options: { readonly fetch?: FetchLike } = {}
   };
 
   return {
+    async fetchDirectory(signal) {
+      const response = await send("/api/players", signal);
+      return read(response, PlayerDirectorySchema);
+    },
+
     async fetchProfile(username, signal) {
       const response = await send(`/api/players/${encodeURIComponent(username)}`, signal);
       return read(response, PublicPlayerProfileSchema);

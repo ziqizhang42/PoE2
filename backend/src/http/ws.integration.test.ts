@@ -7,6 +7,7 @@ import {
   WsServerMessageSchema,
   type AuthUser,
   type GameSnapshot,
+  type PlayerStatus,
   type WsServerMessage,
 } from "@poe2/protocol";
 import { PLAYER_ONE } from "@poe2/rules";
@@ -32,6 +33,8 @@ import {
   type WebSocketLimits,
   type WebSocketLimitsSeams,
 } from "../limits/websocket-limits.js";
+import { createPlayerRepository } from "../player/repository.js";
+import { createPlayerStatusService } from "../player/status-service.js";
 import { authPlugin } from "./auth.js";
 import { createConnectionHub } from "./ws-hub.js";
 import { registerWebSocket, WS_ROUTE } from "./ws.js";
@@ -48,6 +51,7 @@ const authService = createAuthService(
 );
 const realGameService = createGameService(createGameRepository(database.db));
 const hub = createConnectionHub();
+const playerStatusService = createPlayerStatusService(createPlayerRepository(database.db), hub);
 const app = buildApp();
 
 /** Real but generous limits for tests not specifically exercising a ceiling. */
@@ -66,7 +70,13 @@ function testLimits(overrides: Partial<WebSocketLimitsConfig> = {}): WebSocketLi
   return createWebSocketLimits(testLimitsConfig(overrides));
 }
 
-app.register(authPlugin, { ...authConfig, service: authService });
+app.register(authPlugin, {
+  ...authConfig,
+  service: authService,
+  onRegistered: () => {
+    hub.broadcast({ type: "players.changed" });
+  },
+});
 
 await registerWebSocket(app, {
   ...authConfig,
@@ -74,6 +84,7 @@ await registerWebSocket(app, {
   authService,
   gameService: realGameService,
   hub,
+  playerStatusService,
   limits: testLimits(),
 });
 
@@ -100,6 +111,9 @@ interface Client {
   /** Server frames that failed `WsServerMessageSchema`; must stay empty. */
   readonly invalid: string[];
   next(): Promise<WsServerMessage>;
+  nextPlayerMessage(): Promise<Extract<WsServerMessage, { type: `players.${string}` }>>;
+  receivedTypes(): readonly WsServerMessage["type"][];
+  pendingPlayerMessages(): number;
   pending(): number;
   closed(): Promise<{ readonly code: number }>;
   close(): void;
@@ -165,9 +179,12 @@ async function connect(
   target: FastifyInstance = app,
 ): Promise<Client> {
   const messages: WsServerMessage[] = [];
+  const playerMessages: Extract<WsServerMessage, { type: `players.${string}` }>[] = [];
+  const allMessages: WsServerMessage[] = [];
   const invalid: string[] = [];
   let closeCode: number | null = null;
   let cursor = 0;
+  let playerCursor = 0;
 
   const socket = await target.injectWS(
     WS_ROUTE,
@@ -181,7 +198,12 @@ async function connect(
           const parsed = WsServerMessageSchema.safeParse(JSON.parse(text) as unknown);
 
           if (parsed.success) {
-            messages.push(parsed.data);
+            allMessages.push(parsed.data);
+            if (parsed.data.type === "players.status" || parsed.data.type === "players.changed") {
+              playerMessages.push(parsed.data);
+            } else {
+              messages.push(parsed.data);
+            }
           } else {
             invalid.push(text);
           }
@@ -210,7 +232,20 @@ async function connect(
       return message;
     },
 
+    async nextPlayerMessage() {
+      await waitUntil(() => playerMessages.length > playerCursor);
+      const message = playerMessages[playerCursor];
+      playerCursor += 1;
+      if (message === undefined) {
+        throw new Error("expected a player message");
+      }
+      return message;
+    },
+
+    receivedTypes: () => allMessages.map((message) => message.type),
+
     pending: () => messages.length - cursor,
+    pendingPlayerMessages: () => playerMessages.length - playerCursor,
 
     async closed() {
       await waitUntil(() => closeCode !== null);
@@ -237,7 +272,11 @@ async function readOpeningState(
   client: Client,
   user: AuthUser,
   openGameCount = 0,
-): Promise<{ lobbies: readonly unknown[]; games: GameSnapshot[] }> {
+): Promise<{
+  lobbies: readonly unknown[];
+  games: GameSnapshot[];
+  playerStatuses: readonly PlayerStatus[];
+}> {
   const ready = await client.next();
   expect(ready).toEqual({
     type: "session.ready",
@@ -259,9 +298,14 @@ async function readOpeningState(
     games.push(snapshot.game);
   }
 
+  const players = await client.nextPlayerMessage();
+  if (players.type !== "players.status") {
+    throw new Error(`expected players.status, got ${players.type}`);
+  }
+
   expect(await client.next()).toEqual({ type: "session.synced" });
 
-  return { lobbies: lobby.lobbies, games };
+  return { lobbies: lobby.lobbies, games, playerStatuses: players.players };
 }
 
 async function expectGameSnapshot(client: Client): Promise<GameSnapshot> {
@@ -280,6 +324,22 @@ async function expectLobbySnapshot(client: Client): Promise<readonly unknown[]> 
   }
 
   return message.lobbies;
+}
+
+async function nextPlayerStatus(client: Client): Promise<readonly PlayerStatus[]> {
+  for (;;) {
+    const message = await client.nextPlayerMessage();
+    if (message.type === "players.status") {
+      return message.players;
+    }
+  }
+}
+
+async function drainPlayerMessages(client: Client): Promise<void> {
+  await settle();
+  while (client.pendingPlayerMessages() > 0) {
+    await client.nextPlayerMessage();
+  }
 }
 
 describe("upgrade authentication", () => {
@@ -315,12 +375,204 @@ describe("upgrade authentication", () => {
     const alice = await register("Alice");
     const client = await connect(alice);
 
-    const { lobbies, games } = await readOpeningState(client, alice.user);
+    const { lobbies, games, playerStatuses } = await readOpeningState(client, alice.user);
 
     expect(lobbies).toEqual([]);
     expect(games).toEqual([]);
+    expect(playerStatuses).toEqual([{ id: alice.user.id, online: true, activity: null }]);
+    expect(client.receivedTypes()).toEqual([
+      "session.ready",
+      "lobby.snapshot",
+      "players.status",
+      "session.synced",
+    ]);
     expect(client.invalid).toEqual([]);
     expect(hub.connectionCount(alice.user.id)).toBe(1);
+  });
+});
+
+describe("player presence and activity", () => {
+  it("deduplicates tabs and broadcasts only first-connect and last-disconnect presence", async () => {
+    const alice = await register("Alice");
+    const bob = await register("Bob");
+    const observer = await connect(bob);
+    await readOpeningState(observer, bob.user);
+    await drainPlayerMessages(observer);
+
+    const first = await connect(alice);
+    await readOpeningState(first, alice.user);
+    expect(await nextPlayerStatus(observer)).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: null },
+        { id: alice.user.id, online: true, activity: null },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+
+    const second = await connect(alice);
+    await readOpeningState(second, alice.user);
+    await settle();
+    expect(observer.pendingPlayerMessages()).toBe(0);
+
+    first.close();
+    await waitUntil(() => hub.connectionCount(alice.user.id) === 1);
+    await settle();
+    expect(observer.pendingPlayerMessages()).toBe(0);
+
+    second.close();
+    await waitUntil(() => hub.connectionCount(alice.user.id) === 0);
+    expect(await nextPlayerStatus(observer)).toEqual([
+      { id: bob.user.id, online: true, activity: null },
+    ]);
+  });
+
+  it("retains an offline player's authoritative open-room activity", async () => {
+    const alice = await register("Alice");
+    const bob = await register("Bob");
+    const aliceClient = await connect(alice);
+    const bobClient = await connect(bob);
+    await readOpeningState(aliceClient, alice.user);
+    await readOpeningState(bobClient, bob.user);
+    await Promise.all([drainPlayerMessages(aliceClient), drainPlayerMessages(bobClient)]);
+
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+    await aliceClient.next();
+    await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    expect(await nextPlayerStatus(bobClient)).toContainEqual({
+      id: alice.user.id,
+      online: true,
+      activity: "open_room",
+    });
+
+    aliceClient.close();
+    await waitUntil(() => hub.connectionCount(alice.user.id) === 0);
+
+    expect(await nextPlayerStatus(bobClient)).toContainEqual({
+      id: alice.user.id,
+      online: false,
+      activity: "open_room",
+    });
+  });
+
+  it("broadcasts complete replacements through join, decline, and cancellation", async () => {
+    const alice = await register("Alice");
+    const bob = await register("Bob");
+    const aliceClient = await connect(alice);
+    const bobClient = await connect(bob);
+    await readOpeningState(aliceClient, alice.user);
+    await readOpeningState(bobClient, bob.user);
+    await Promise.all([drainPlayerMessages(aliceClient), drainPlayerMessages(bobClient)]);
+
+    send(aliceClient, {
+      type: "lobby.create",
+      requestId: randomUUID(),
+      rated: false,
+      creatorSeat: PLAYER_ONE,
+      timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    });
+    await aliceClient.next();
+    const created = await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    expect(await nextPlayerStatus(aliceClient)).toContainEqual({
+      id: alice.user.id,
+      online: true,
+      activity: "open_room",
+    });
+    await nextPlayerStatus(bobClient);
+
+    send(bobClient, { type: "lobby.join", requestId: randomUUID(), gameId: created.id });
+    await bobClient.next();
+    const joined = await expectGameSnapshot(bobClient);
+    await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    await expectLobbySnapshot(aliceClient);
+    expect(await nextPlayerStatus(aliceClient)).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: "in_game" },
+        { id: alice.user.id, online: true, activity: "in_game" },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+    await nextPlayerStatus(bobClient);
+
+    if (joined.status !== "ready_check") {
+      throw new Error(`expected ready_check, got ${joined.status}`);
+    }
+    send(bobClient, {
+      type: "game.decline",
+      requestId: randomUUID(),
+      gameId: joined.id,
+      readyCheckGeneration: joined.readyCheck.generation,
+    });
+    await bobClient.next();
+    await bobClient.next();
+    await expectGameSnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    await expectLobbySnapshot(aliceClient);
+    expect(await nextPlayerStatus(bobClient)).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: null },
+        { id: alice.user.id, online: true, activity: "open_room" },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+    await nextPlayerStatus(aliceClient);
+
+    send(aliceClient, { type: "lobby.cancel", requestId: randomUUID(), gameId: created.id });
+    await aliceClient.next();
+    await aliceClient.next();
+    await expectLobbySnapshot(aliceClient);
+    await expectLobbySnapshot(bobClient);
+    expect(await nextPlayerStatus(aliceClient)).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: null },
+        { id: alice.user.id, online: true, activity: null },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+  });
+
+  it("announces registration and a rated result as directory changes", async () => {
+    const alice = await register("Alice");
+    const aliceClient = await connect(alice);
+    await readOpeningState(aliceClient, alice.user);
+    await drainPlayerMessages(aliceClient);
+
+    const bob = await register("Bob");
+    expect(await aliceClient.nextPlayerMessage()).toEqual({ type: "players.changed" });
+
+    const bobClient = await connect(bob);
+    await readOpeningState(bobClient, bob.user);
+    await nextPlayerStatus(aliceClient);
+    const game = await startGameThrough(aliceClient, bobClient, alice, bob, {
+      rated: true,
+      timeControl: { kind: "timed", initialMs: 300_000, incrementMs: 3_000 },
+    });
+    await Promise.all([drainPlayerMessages(aliceClient), drainPlayerMessages(bobClient)]);
+
+    send(aliceClient, {
+      type: "game.resign",
+      requestId: randomUUID(),
+      gameId: game.id,
+      expectedRevision: game.revision,
+    });
+    await aliceClient.next();
+    await expectGameSnapshot(aliceClient);
+    await expectGameSnapshot(bobClient);
+
+    expect(await aliceClient.nextPlayerMessage()).toEqual({ type: "players.changed" });
+    expect(await bobClient.nextPlayerMessage()).toEqual({ type: "players.changed" });
+    expect(await nextPlayerStatus(aliceClient)).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: null },
+        { id: alice.user.id, online: true, activity: null },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
   });
 });
 
@@ -697,6 +949,12 @@ describe("lobby and game lifecycle", () => {
 
     expect(opening.lobbies).toEqual([]);
     expect(opening.games).toEqual([game]);
+    expect(opening.playerStatuses).toEqual(
+      [
+        { id: bob.user.id, online: true, activity: "in_game" },
+        { id: alice.user.id, online: true, activity: "in_game" },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
     expect(hub.connectionCount(alice.user.id)).toBe(2);
   });
 
@@ -1080,13 +1338,15 @@ async function buildLimitedApp(
   attempt: (account: Account) => Promise<number | "connected">;
 }> {
   const limitedApp = buildApp();
+  const limitedHub = createConnectionHub();
 
   await registerWebSocket(limitedApp, {
     ...authConfig,
     allowedOrigins: [ALLOWED_ORIGIN],
     authService,
     gameService: realGameService,
-    hub: createConnectionHub(),
+    hub: limitedHub,
+    playerStatusService: createPlayerStatusService(createPlayerRepository(database.db), limitedHub),
     limits: createWebSocketLimits(testLimitsConfig(overrides), seams),
   });
 
@@ -1125,13 +1385,15 @@ async function buildFaultyApp(
   authOverrides: Partial<AuthService> = {},
 ): Promise<{ readonly app: FastifyInstance; connect: () => Promise<Client> }> {
   const faultyApp = buildApp();
+  const faultyHub = createConnectionHub();
 
   await registerWebSocket(faultyApp, {
     ...authConfig,
     allowedOrigins: [ALLOWED_ORIGIN],
     authService: { ...authService, ...authOverrides },
     gameService: { ...realGameService, ...gameOverrides },
-    hub: createConnectionHub(),
+    hub: faultyHub,
+    playerStatusService: createPlayerStatusService(createPlayerRepository(database.db), faultyHub),
     limits: testLimits(),
   });
 
@@ -1146,13 +1408,19 @@ async function startGameThrough(
   joinerClient: Client,
   owner: Account,
   joiner: Account,
+  options: {
+    readonly rated?: boolean;
+    readonly timeControl?:
+      | { readonly kind: "untimed"; readonly initialMs: null; readonly incrementMs: null }
+      | { readonly kind: "timed"; readonly initialMs: number; readonly incrementMs: number };
+  } = {},
 ): Promise<GameSnapshot> {
   send(ownerClient, {
     type: "lobby.create",
     requestId: randomUUID(),
-    rated: false,
+    rated: options.rated ?? false,
     creatorSeat: PLAYER_ONE,
-    timeControl: { kind: "untimed", initialMs: null, incrementMs: null },
+    timeControl: options.timeControl ?? { kind: "untimed", initialMs: null, incrementMs: null },
   });
   await ownerClient.next();
   const created = await expectGameSnapshot(ownerClient);

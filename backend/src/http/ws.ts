@@ -27,7 +27,9 @@ import type { GameErrorCode, GameService } from "../game/service.js";
 import { createCommandQueue } from "../limits/command-queue.js";
 import type { ConnectionAdmission } from "../limits/connection-registry.js";
 import type { WebSocketLimits } from "../limits/websocket-limits.js";
+import type { PlayerStatusService } from "../player/status-service.js";
 import { clientAddressKey } from "./client-address.js";
+import { publishAbandonedGame, publishFinishedGame } from "./game-publication.js";
 import { readSessionCookie } from "./session.js";
 import { sendMessage, type ConnectionHub } from "./ws-hub.js";
 
@@ -52,6 +54,7 @@ export interface WebSocketHttpOptions extends AuthConfig, WebSocketConfig {
   readonly authService: AuthService;
   readonly gameService: GameService;
   readonly hub: ConnectionHub;
+  readonly playerStatusService: PlayerStatusService;
   readonly limits: WebSocketLimits;
 }
 
@@ -184,9 +187,19 @@ function handleConnection(
   const { hub, gameService } = options;
 
   // Buffer hub traffic until the opening sequence has been sent.
-  hub.add(session.user.id, socket);
+  const firstConnection = hub.add(session.user.id, socket);
 
   let abandoned = false;
+
+  const removeConnection = (): void => {
+    if (!hub.remove(session.user.id, socket)) {
+      return;
+    }
+
+    void publishPlayerStatuses(options).catch((error: unknown) => {
+      log.error({ err: error }, "could not publish player disconnect");
+    });
+  };
 
   const queue = createCommandQueue({
     maxDepth: options.limits.maxPendingCommands,
@@ -207,7 +220,7 @@ function handleConnection(
     if (!accepted && !abandoned) {
       // Queue-overflow replies would bypass command budgets, so shed the connection.
       abandoned = true;
-      hub.remove(session.user.id, socket);
+      removeConnection();
       closeSocket(socket, TRY_AGAIN_LATER, "command backlog exceeded");
     }
   });
@@ -217,7 +230,7 @@ function handleConnection(
   });
 
   socket.on("close", () => {
-    hub.remove(session.user.id, socket);
+    removeConnection();
     session.admission.release();
   });
 
@@ -238,19 +251,30 @@ function handleConnection(
         sendMessage(socket, { type: "game.snapshot", game });
       }
 
+      const players = await options.playerStatusService.snapshot();
+      sendMessage(socket, players);
+      if (firstConnection) {
+        // The opening socket already received this replacement directly.
+        hub.broadcast(players, socket);
+      }
+
       // Only this marker means the opening state is complete.
       sendMessage(socket, { type: "session.synced" });
     } catch (error) {
       // Do not leave a half-initialized client able to issue commands.
       log.error({ err: error }, "websocket opening sequence failed");
       abandoned = true;
-      hub.remove(session.user.id, socket);
+      removeConnection();
       closeSocket(socket, INTERNAL_ERROR, "could not establish session state");
       return;
     }
 
     hub.activate(session.user.id, socket);
   });
+}
+
+async function publishPlayerStatuses(options: WebSocketHttpOptions): Promise<void> {
+  options.hub.broadcast(await options.playerStatusService.snapshot());
 }
 
 async function handleFrame(
@@ -376,14 +400,22 @@ async function runCommand(
     hub.broadcast({ type: "lobby.snapshot", lobbies: await gameService.listWaitingLobbies() });
   };
 
+  const broadcastStatuses = (): Promise<void> => publishPlayerStatuses(options);
+
   /** Fan-out for a reopened lobby whose released player is absent from its snapshot. */
   const publishAbandonedCheck = async (
     game: GameSnapshot,
     releasedPlayerId: string,
   ): Promise<void> => {
-    hub.send(game.players.playerOne.id, { type: "game.snapshot", game });
-    hub.send(releasedPlayerId, { type: "game.closed", gameId: game.id });
-    await broadcastLobbies();
+    await publishAbandonedGame(
+      {
+        hub,
+        playerStatusService: options.playerStatusService,
+        listWaitingLobbies: () => gameService.listWaitingLobbies(),
+      },
+      game,
+      releasedPlayerId,
+    );
   };
 
   const sendGameToPlayers = (game: GameSnapshot): void => {
@@ -391,6 +423,14 @@ async function runCommand(
     for (const userId of participantIds(game)) {
       hub.send(userId, snapshot);
     }
+  };
+
+  const publishGameResult = async (game: GameSnapshot): Promise<void> => {
+    if (game.status !== "finished") {
+      sendGameToPlayers(game);
+      return;
+    }
+    await publishFinishedGame({ hub, playerStatusService: options.playerStatusService }, game);
   };
 
   switch (message.type) {
@@ -419,6 +459,7 @@ async function runCommand(
         publish: async () => {
           sendGameToPlayers(result.value);
           await broadcastLobbies();
+          await broadcastStatuses();
         },
       };
     }
@@ -443,6 +484,7 @@ async function runCommand(
         publish: async () => {
           sendGameToPlayers(result.value);
           await broadcastLobbies();
+          await broadcastStatuses();
         },
       };
     }
@@ -459,9 +501,9 @@ async function runCommand(
 
       return {
         ok: true,
-        publish: () => {
+        publish: async () => {
           sendGameToPlayers(result.value);
-          return Promise.resolve();
+          await broadcastStatuses();
         },
       };
     }
@@ -495,6 +537,7 @@ async function runCommand(
         publish: async () => {
           hub.send(actor.id, { type: "game.closed", gameId: result.value.gameId });
           await broadcastLobbies();
+          await broadcastStatuses();
         },
       };
     }
@@ -514,19 +557,13 @@ async function runCommand(
           : {
               ok: false,
               code: result.code,
-              publish: () => {
-                sendGameToPlayers(committed);
-                return Promise.resolve();
-              },
+              publish: () => publishGameResult(committed),
             };
       }
 
       return {
         ok: true,
-        publish: () => {
-          sendGameToPlayers(result.value);
-          return Promise.resolve();
-        },
+        publish: () => publishGameResult(result.value),
       };
     }
 
@@ -544,19 +581,13 @@ async function runCommand(
           : {
               ok: false,
               code: result.code,
-              publish: () => {
-                sendGameToPlayers(committed);
-                return Promise.resolve();
-              },
+              publish: () => publishGameResult(committed),
             };
       }
 
       return {
         ok: true,
-        publish: () => {
-          sendGameToPlayers(result.value);
-          return Promise.resolve();
-        },
+        publish: () => publishGameResult(result.value),
       };
     }
   }

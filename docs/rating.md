@@ -35,11 +35,13 @@ Ladder membership is `rated_games_played > 0`, not a deviation threshold. Inacti
 
 Public profiles expose rounded rating, rounded deviation, and a whole percentile among rated players. An account outside that population receives `percentile: null`, not zero. Volatility remains internal.
 
+The authenticated player directory is a separate complete read. It orders accounts by rounded display rating descending and canonical username alphabetically for ties. Rated accounts use their ladder percentile as `colorPercentile`. Unrated accounts always display 1500 and estimate the color from the share of rated accounts below 1500; an empty rated population uses percentile 50. This estimate is presentation only and does not add the account to the ladder.
+
 The aggregate profile fields and rating history are read in one repeatable-read transaction so every field describes the same committed database snapshot.
 
 Profile history reads the newest 100 ledger events, orders them oldest first, and prepends the oldest event's `before` value so the first visible result forms a line. Subject-relative game history exposes before and after values for each rated result. Neither view recomputes ratings from games.
 
-Public query code lives in [`backend/src/player/repository.ts`](../backend/src/player/repository.ts) and [`backend/src/rating/reader.ts`](../backend/src/rating/reader.ts).
+Public and directory query code lives in [`backend/src/player/repository.ts`](../backend/src/player/repository.ts) and [`backend/src/rating/reader.ts`](../backend/src/rating/reader.ts). Registration and rated finishes push `players.changed` so signed-in clients invalidate their cached directory.
 
 ## Verification
 

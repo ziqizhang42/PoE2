@@ -8,14 +8,17 @@ import type { WebSocket } from "ws";
 
 export interface ConnectionHub {
   /** Registers a socket that buffers hub traffic until it is activated. */
-  add(userId: string, socket: WebSocket): void;
+  /** Returns true when this is the user's first connection. */
+  add(userId: string, socket: WebSocket): boolean;
   /** Flushes anything buffered, in arrival order, and starts live delivery. */
   activate(userId: string, socket: WebSocket): void;
-  remove(userId: string, socket: WebSocket): void;
+  /** Returns true when this removed the user's last connection. */
+  remove(userId: string, socket: WebSocket): boolean;
   /** Delivers to every socket the user currently has open, so tabs stay in step. */
   send(userId: string, message: WsServerMessage): void;
-  broadcast(message: WsServerMessage): void;
+  broadcast(message: WsServerMessage, excludedSocket?: WebSocket): void;
   connectionCount(userId: string): number;
+  connectedUserIds(): readonly string[];
   totalConnections(): number;
 }
 
@@ -36,8 +39,10 @@ export function createConnectionHub(): ConnectionHub {
   return {
     add(userId, socket) {
       const connections = connectionsByUser.get(userId) ?? new Map<WebSocket, Connection>();
+      const first = connections.size === 0;
       connections.set(socket, { buffered: [] });
       connectionsByUser.set(userId, connections);
+      return first;
     },
 
     activate(userId, socket) {
@@ -56,13 +61,17 @@ export function createConnectionHub(): ConnectionHub {
     remove(userId, socket) {
       const connections = connectionsByUser.get(userId);
       if (connections === undefined) {
-        return;
+        return false;
       }
 
-      connections.delete(socket);
+      if (!connections.delete(socket)) {
+        return false;
+      }
       if (connections.size === 0) {
         connectionsByUser.delete(userId);
+        return true;
       }
+      return false;
     },
 
     send(userId, message) {
@@ -77,16 +86,21 @@ export function createConnectionHub(): ConnectionHub {
       }
     },
 
-    broadcast(message) {
+    broadcast(message, excludedSocket) {
       const payload = JSON.stringify(message);
       for (const connections of connectionsByUser.values()) {
         for (const [socket, connection] of connections) {
+          if (socket === excludedSocket) {
+            continue;
+          }
           deliver(socket, connection, payload);
         }
       }
     },
 
     connectionCount: (userId) => connectionsByUser.get(userId)?.size ?? 0,
+
+    connectedUserIds: () => [...connectionsByUser.keys()].sort(),
 
     totalConnections() {
       let total = 0;

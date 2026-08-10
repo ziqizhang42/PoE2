@@ -102,10 +102,6 @@ export function OpenLobbiesPanel({
         </div>
       )}
 
-      <p className={HINT}>
-        Whoever reaches the server first takes the seat. A lobby that has already been claimed comes
-        back as a plain refusal, and the list refreshes.
-      </p>
     </section>
   );
 }

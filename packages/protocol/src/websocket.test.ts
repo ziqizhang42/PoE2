@@ -25,6 +25,8 @@ import {
   WsLobbyCreateMessageSchema,
   WsLobbyJoinMessageSchema,
   WsLobbySnapshotMessageSchema,
+  WsPlayersChangedMessageSchema,
+  WsPlayersStatusMessageSchema,
   WsServerMessageSchema,
   WsSessionReadyMessageSchema,
   WsSessionSyncedMessageSchema,
@@ -236,6 +238,14 @@ describe("WsServerMessageSchema", () => {
     ],
   };
   const sessionSynced = { type: "session.synced" };
+  const playersStatus = {
+    type: "players.status",
+    players: [
+      { id: PLAYER_ONE_USER.id, online: true, activity: "open_room" },
+      { id: PLAYER_TWO_USER.id, online: false, activity: "in_game" },
+    ],
+  };
+  const playersChanged = { type: "players.changed" };
   const gameClosed = { type: "game.closed", gameId: GAME_ID };
   const commandAccepted = { type: "command.accepted", requestId: REQUEST_ID };
   const commandRejected = {
@@ -249,6 +259,8 @@ describe("WsServerMessageSchema", () => {
     ["session.ready", sessionReady, WsSessionReadyMessageSchema],
     ["session.synced", sessionSynced, WsSessionSyncedMessageSchema],
     ["lobby.snapshot", lobbySnapshot, WsLobbySnapshotMessageSchema],
+    ["players.status", playersStatus, WsPlayersStatusMessageSchema],
+    ["players.changed", playersChanged, WsPlayersChangedMessageSchema],
     ["game.closed", gameClosed, WsGameClosedMessageSchema],
     ["command.accepted", commandAccepted, WsCommandAcceptedMessageSchema],
     ["command.rejected", commandRejected, WsCommandRejectedMessageSchema],
@@ -338,6 +350,24 @@ describe("WsServerMessageSchema", () => {
     expect(WsServerMessageSchema.safeParse({ type: "session.synced", games: [] }).success).toBe(
       false,
     );
+  });
+
+  it.each([
+    [
+      "an unknown activity",
+      { ...playersStatus, players: [{ ...playersStatus.players[0], activity: "idle" }] },
+    ],
+    [
+      "a missing online flag",
+      { ...playersStatus, players: [{ id: PLAYER_ONE_USER.id, activity: null }] },
+    ],
+    [
+      "an extra status field",
+      { ...playersStatus, players: [{ ...playersStatus.players[0], username: "private" }] },
+    ],
+    ["an extra change field", { ...playersChanged, playerId: PLAYER_ONE_USER.id }],
+  ])("rejects player state with %s", (_label, message) => {
+    expect(WsServerMessageSchema.safeParse(message).success).toBe(false);
   });
 
   it("rejects an unknown server message type", () => {

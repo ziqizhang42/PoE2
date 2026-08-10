@@ -10,6 +10,7 @@ import {
   type GameReplay,
   type GameSnapshot,
   type LobbyEntry,
+  type PlayerDirectoryEntry,
   type PublicPlayerProfile,
   type ReadyCheckGameSnapshot,
   type TimeControl,
@@ -507,6 +508,7 @@ export function createFakeGamesClient(): FakeGamesClient {
 }
 
 export interface FakePlayersClient extends PlayersClient {
+  readonly fetchDirectory: Mock<(signal?: AbortSignal) => Promise<readonly PlayerDirectoryEntry[]>>;
   readonly fetchProfile: Mock<
     (username: string, signal?: AbortSignal) => Promise<PublicPlayerProfile>
   >;
@@ -517,6 +519,10 @@ export interface FakePlayersClient extends PlayersClient {
 
 export function createFakePlayersClient(): FakePlayersClient {
   return {
+    fetchDirectory: vi.fn(async () => [
+      { id: USER_ONE.id, username: USER_ONE.username, rating: 1500, colorPercentile: 50 },
+      { id: USER_TWO.id, username: USER_TWO.username, rating: 1500, colorPercentile: 50 },
+    ]),
     fetchGames: vi.fn<(username: string, request?: PlayerGamesRequest) => Promise<GameHistoryPage>>(
       async () => historyPage(),
     ),

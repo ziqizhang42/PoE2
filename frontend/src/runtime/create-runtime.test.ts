@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AUTH_SESSION_KEY } from "../auth/queries.ts";
 import { GAMES_QUERY_ROOT } from "../games/query-keys.ts";
 import type { LiveClientOptions } from "../live/client.ts";
-import { PLAYER_QUERY_ROOT } from "../players/query-keys.ts";
+import { PLAYER_DIRECTORY_KEY, PLAYER_QUERY_ROOT } from "../players/query-keys.ts";
 import { createFakeClock, createFakeLiveClient, USER_ONE } from "../test/fakes.ts";
 import { createAppRuntime } from "./create-runtime.ts";
 import { createQueryClient } from "./query-client.ts";
@@ -55,6 +55,25 @@ describe("createAppRuntime", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: PLAYER_QUERY_ROOT });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: GAMES_QUERY_ROOT });
     expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates only the directory for a player-change push", () => {
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    const captured: LiveClientOptions[] = [];
+
+    createAppRuntime({
+      queryClient,
+      createLive: (options) => {
+        captured.push(options);
+        return createFakeLiveClient();
+      },
+    });
+
+    captured[0]?.onPlayerDirectoryStale?.();
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: PLAYER_DIRECTORY_KEY, exact: true });
+    expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
   it("hands the live client its own clock, so there is one timer seam", () => {

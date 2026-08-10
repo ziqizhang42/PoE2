@@ -13,6 +13,15 @@ import type { GameSnapshot, LobbyEntry, TimeControl } from "./game.js";
 
 export const WS_PROTOCOL_VERSION = 1;
 
+export const PLAYER_ACTIVITIES = ["open_room", "in_game"] as const;
+export type PlayerActivity = (typeof PLAYER_ACTIVITIES)[number];
+
+export interface PlayerStatus {
+  readonly id: string;
+  readonly online: boolean;
+  readonly activity: PlayerActivity | null;
+}
+
 /** Closed rejection set shared by client and adapter. */
 export type WsErrorCode =
   | "invalid_message"
@@ -112,6 +121,17 @@ export interface WsGameClosedMessage {
   readonly gameId: string;
 }
 
+/** Complete replacement; omitted players are offline with no current activity. */
+export interface WsPlayersStatusMessage {
+  readonly type: "players.status";
+  readonly players: readonly PlayerStatus[];
+}
+
+/** Invalidates the HTTP directory after its durable fields may have changed. */
+export interface WsPlayersChangedMessage {
+  readonly type: "players.changed";
+}
+
 /** Marks the opening replay complete; session.ready alone does not. */
 export interface WsSessionSyncedMessage {
   readonly type: "session.synced";
@@ -136,6 +156,8 @@ export type WsServerMessage =
   | WsLobbySnapshotMessage
   | WsGameSnapshotMessage
   | WsGameClosedMessage
+  | WsPlayersStatusMessage
+  | WsPlayersChangedMessage
   | WsCommandAcceptedMessage
   | WsCommandRejectedMessage;
 
@@ -252,6 +274,21 @@ const gameClosedMessageSchema = z.strictObject({
   gameId: gameIdSchema,
 });
 
+const playerStatusSchema: z.ZodType<PlayerStatus> = z.strictObject({
+  id: z.uuid(),
+  online: z.boolean(),
+  activity: z.union([z.enum(PLAYER_ACTIVITIES), z.null()]),
+});
+
+const playersStatusMessageSchema = z.strictObject({
+  type: z.literal("players.status"),
+  players: z.array(playerStatusSchema),
+});
+
+const playersChangedMessageSchema = z.strictObject({
+  type: z.literal("players.changed"),
+});
+
 const commandAcceptedMessageSchema = z.strictObject({
   type: z.literal("command.accepted"),
   requestId: requestIdSchema,
@@ -298,6 +335,11 @@ export const WsLobbySnapshotMessageSchema: z.ZodType<WsLobbySnapshotMessage> =
 export const WsGameSnapshotMessageSchema: z.ZodType<WsGameSnapshotMessage> =
   gameSnapshotMessageSchema;
 export const WsGameClosedMessageSchema: z.ZodType<WsGameClosedMessage> = gameClosedMessageSchema;
+export const PlayerStatusSchema: z.ZodType<PlayerStatus> = playerStatusSchema;
+export const WsPlayersStatusMessageSchema: z.ZodType<WsPlayersStatusMessage> =
+  playersStatusMessageSchema;
+export const WsPlayersChangedMessageSchema: z.ZodType<WsPlayersChangedMessage> =
+  playersChangedMessageSchema;
 export const WsCommandAcceptedMessageSchema: z.ZodType<WsCommandAcceptedMessage> =
   commandAcceptedMessageSchema;
 export const WsCommandRejectedMessageSchema: z.ZodType<WsCommandRejectedMessage> =
@@ -309,6 +351,8 @@ export const WsServerMessageSchema: z.ZodType<WsServerMessage> = z.discriminated
   lobbySnapshotMessageSchema,
   gameSnapshotMessageSchema,
   gameClosedMessageSchema,
+  playersStatusMessageSchema,
+  playersChangedMessageSchema,
   commandAcceptedMessageSchema,
   commandRejectedMessageSchema,
 ]);

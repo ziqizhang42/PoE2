@@ -18,6 +18,14 @@ export interface PublicPlayerStatistics {
 /** Whole percentile among rated players; null means outside that population. */
 export type RatingPercentile = number | null;
 
+export interface PlayerDirectoryEntry {
+  readonly id: string;
+  readonly username: string;
+  readonly rating: number;
+  /** Always present, including an estimated placement for unrated accounts. */
+  readonly colorPercentile: number;
+}
+
 export interface RatingPoint {
   readonly at: string;
   readonly rating: number;
@@ -42,6 +50,7 @@ export type PlayerErrorCode =
   | "player_not_found"
   | "invalid_request"
   | "invalid_cursor"
+  | "unauthenticated"
   | "rate_limited"
   | "internal_error";
 
@@ -103,11 +112,23 @@ export const PublicPlayerProfileSchema: z.ZodType<PublicPlayerProfile> = z.stric
     .max(MAX_RATING_HISTORY + 1),
 });
 
+export const PlayerDirectoryEntrySchema: z.ZodType<PlayerDirectoryEntry> = z.strictObject({
+  id: z.uuid(),
+  username: UsernameSchema,
+  rating: z.int(),
+  colorPercentile: z.int().min(0).max(100),
+});
+
+export const PlayerDirectorySchema: z.ZodType<readonly PlayerDirectoryEntry[]> = z.array(
+  PlayerDirectoryEntrySchema,
+);
+
 export const PlayerErrorResponseSchema: z.ZodType<PlayerErrorResponse> = z.strictObject({
   code: z.enum([
     "player_not_found",
     "invalid_request",
     "invalid_cursor",
+    "unauthenticated",
     "rate_limited",
     "internal_error",
   ]),

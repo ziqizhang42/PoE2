@@ -123,6 +123,8 @@ export interface LiveClientOptions {
   readonly onSessionSuspect?: () => void;
   /** Invalidates archives after a finish or a reconnect that may have missed one. */
   readonly onGameHistoryStale?: (userId: string) => void;
+  /** Invalidates the authenticated directory after registration or rating changes. */
+  readonly onPlayerDirectoryStale?: () => void;
 }
 
 export type LiveClientFactory = (options: LiveClientOptions) => LiveClient;
@@ -160,6 +162,7 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
   const random = options.random ?? Math.random;
   const onSessionSuspect = options.onSessionSuspect ?? (() => {});
   const onGameHistoryStale = options.onGameHistoryStale ?? (() => {});
+  const onPlayerDirectoryStale = options.onPlayerDirectoryStale ?? (() => {});
 
   const store = createLiveStore();
   const pending = new Map<string, PendingCommand>();
@@ -295,6 +298,14 @@ export function createLiveClient(options: LiveClientOptions = {}): LiveClient {
           games: removeGame(state.games, message.gameId),
           gameReceivedAtMs: removeGameReceiptTime(state.gameReceivedAtMs, message.gameId),
         }));
+        return;
+
+      case "players.status":
+        store.setState({ playerStatuses: message.players });
+        return;
+
+      case "players.changed":
+        onPlayerDirectoryStale();
         return;
 
       case "command.accepted":

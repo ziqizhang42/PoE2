@@ -1,4 +1,10 @@
-import { MAX_RATING_HISTORY, type PublicPlayerProfile, type RatingPoint } from "@poe2/protocol";
+import {
+  MAX_RATING_HISTORY,
+  type PlayerActivity,
+  type PlayerDirectoryEntry,
+  type PublicPlayerProfile,
+  type RatingPoint,
+} from "@poe2/protocol";
 import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -6,9 +12,30 @@ import type { Database, DatabaseExecutor } from "../db/client.js";
 import { ratingEvents, users } from "../db/schema.js";
 
 export interface PlayerRepository {
+  listDirectory(): Promise<readonly PlayerDirectoryEntry[]>;
+  listPlayerActivities(): Promise<readonly PlayerActivityRecord[]>;
   findPublicProfile(normalizedUsername: string): Promise<PublicPlayerProfile | null>;
   findUserIdByUsername(normalizedUsername: string): Promise<string | null>;
 }
+
+export interface PlayerActivityRecord {
+  readonly id: string;
+  readonly activity: PlayerActivity;
+}
+
+const INITIAL_RATING = 1500;
+
+const directoryRowSchema = z.strictObject({
+  id: z.uuid(),
+  username: z.string(),
+  rating: z.number().int(),
+  colorPercentile: z.number().int().min(0).max(100),
+});
+
+const activityRowSchema = z.strictObject({
+  id: z.uuid(),
+  activity: z.enum(["open_room", "in_game"]),
+});
 
 const rowSchema = z.strictObject({
   id: z.uuid(),
@@ -60,6 +87,74 @@ async function readRatingHistory(
 
 export function createPlayerRepository(db: Database): PlayerRepository {
   return {
+    async listDirectory() {
+      const rows = await db.execute(sql`
+        with rated_population as (
+          select
+            count(*)::integer as total,
+            count(*) filter (where rating < ${INITIAL_RATING})::integer as initial_below
+          from users
+          where rated_games_played > 0
+        ), directory as (
+          select
+            u.id as "id",
+            u.username as "username",
+            case
+              when u.rated_games_played = 0 then ${INITIAL_RATING}
+              else round(u.rating)::integer
+            end as "rating",
+            case
+              when p.total = 0 then 50
+              when u.rated_games_played = 0
+                then round(100.0 * p.initial_below / p.total)::integer
+              else round(100.0 * (
+                select count(*)
+                from users lower_player
+                where lower_player.rated_games_played > 0
+                  and lower_player.rating < u.rating
+              ) / p.total)::integer
+            end as "colorPercentile",
+            u.normalized_username as "normalizedUsername"
+          from users u
+          cross join rated_population p
+        )
+        select "id", "username", "rating", "colorPercentile"
+        from directory
+        order by
+          "rating" desc,
+          "normalizedUsername" collate "C" asc,
+          "username" collate "C" asc,
+          "id" asc
+      `);
+
+      return rows.map((row) => directoryRowSchema.parse(row));
+    },
+
+    async listPlayerActivities() {
+      const rows = await db.execute(sql`
+        with occupied_seats as (
+          select player_one_id as id, status::text as status
+          from games
+          where status in ('waiting', 'ready_check', 'active')
+          union all
+          select player_two_id as id, status::text as status
+          from games
+          where status in ('ready_check', 'active') and player_two_id is not null
+        )
+        select
+          id as "id",
+          case
+            when bool_or(status in ('ready_check', 'active')) then 'in_game'
+            else 'open_room'
+          end as "activity"
+        from occupied_seats
+        group by id
+        order by id
+      `);
+
+      return rows.map((row) => activityRowSchema.parse(row));
+    },
+
     async findPublicProfile(normalizedUsername) {
       return db.transaction(
         async (executor) => {

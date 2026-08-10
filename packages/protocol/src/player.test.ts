@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeUsername } from "./auth.js";
-import { PlayerErrorResponseSchema, PublicPlayerProfileSchema } from "./player.js";
+import {
+  PlayerDirectorySchema,
+  PlayerErrorResponseSchema,
+  PublicPlayerProfileSchema,
+} from "./player.js";
 
 const profile = {
   username: "Player_One",
@@ -96,18 +100,21 @@ describe("public player profile", () => {
 });
 
 describe("player errors", () => {
-  it.each(["player_not_found", "invalid_request", "rate_limited", "internal_error"])(
-    "accepts %s",
-    (code) => {
-      expect(
-        PlayerErrorResponseSchema.safeParse({ code, message: "Safe public message" }).success,
-      ).toBe(true);
-    },
-  );
+  it.each([
+    "player_not_found",
+    "invalid_request",
+    "unauthenticated",
+    "rate_limited",
+    "internal_error",
+  ])("accepts %s", (code) => {
+    expect(
+      PlayerErrorResponseSchema.safeParse({ code, message: "Safe public message" }).success,
+    ).toBe(true);
+  });
 
   it("rejects unknown and extra details", () => {
     expect(
-      PlayerErrorResponseSchema.safeParse({ code: "unauthenticated", message: "No" }).success,
+      PlayerErrorResponseSchema.safeParse({ code: "permission_denied", message: "No" }).success,
     ).toBe(false);
     expect(
       PlayerErrorResponseSchema.safeParse({
@@ -116,6 +123,33 @@ describe("player errors", () => {
         userId: "private",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("player directory", () => {
+  const entry = {
+    id: "e4aa457e-7620-4f14-ae26-6c20f3995ee1",
+    username: "Player_One",
+    rating: 1500,
+    colorPercentile: 50,
+  };
+
+  it("accepts only the public list shape", () => {
+    expect(PlayerDirectorySchema.parse([entry])).toEqual([entry]);
+    expect(PlayerDirectorySchema.safeParse([{ ...entry, passwordHash: "private" }]).success).toBe(
+      false,
+    );
+  });
+
+  it.each([-1, 101, 50.5, null])("rejects a color percentile of %o", (colorPercentile) => {
+    expect(PlayerDirectorySchema.safeParse([{ ...entry, colorPercentile }]).success).toBe(false);
+  });
+
+  it("requires a rounded display rating and canonical protocol username", () => {
+    expect(PlayerDirectorySchema.safeParse([{ ...entry, rating: 1500.4 }]).success).toBe(false);
+    expect(PlayerDirectorySchema.safeParse([{ ...entry, username: "has spaces" }]).success).toBe(
+      false,
+    );
   });
 });
 

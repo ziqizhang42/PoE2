@@ -29,7 +29,12 @@ function signedInRuntime(): TestRuntime {
 }
 
 function ready(runtime: TestRuntime): void {
-  runtime.live.store.setState({ status: "ready", userId: USER_ONE.id, synced: true });
+  runtime.live.store.setState({
+    status: "ready",
+    userId: USER_ONE.id,
+    synced: true,
+    playerStatuses: [{ id: USER_ONE.id, online: true, activity: null }],
+  });
 }
 
 async function openLobby(runtime: TestRuntime): Promise<void> {
@@ -524,10 +529,11 @@ describe("LobbyPage", () => {
       ready(runtime);
       await openLobby(runtime);
 
-      expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: "Player 1" })).not.toBeInTheDocument();
       await showNewGame();
 
-      const choices = screen.getAllByRole("radio");
+      const dialog = within(screen.getByRole("dialog", { name: "New game" }));
+      const choices = dialog.getAllByRole("radio");
       expect(choices.map((choice) => choice.closest("label")?.textContent)).toStrictEqual([
         "Player 1",
         "Player 2",

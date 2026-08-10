@@ -59,6 +59,7 @@ function buildService(overrides: Partial<AuthService> = {}): AuthService {
 function buildTestApp(
   service: AuthService,
   options: {
+    readonly onRegistered?: (user: AuthUser) => void;
     readonly sessionCookieName?: string;
     readonly secureCookies?: boolean;
     readonly trustProxy?: false | number;
@@ -72,6 +73,7 @@ function buildTestApp(
     service,
     sessionCookieName: options.sessionCookieName ?? "poe2_session",
     secureCookies: options.secureCookies ?? false,
+    ...(options.onRegistered === undefined ? {} : { onRegistered: options.onRegistered }),
   });
 
   return instance;
@@ -135,6 +137,22 @@ describe("auth HTTP routes", () => {
     expect(setCookie).toContain("SameSite=Lax");
     expect(setCookie).toContain("Expires=");
     expect(setCookie).not.toContain("Secure");
+  });
+
+  it("announces only a successfully committed registration", async () => {
+    const announced: AuthUser[] = [];
+    app = buildTestApp(buildService({ register: async () => ({ ok: true, session: SESSION }) }), {
+      onRegistered: (user) => announced.push(user),
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: credentials(),
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(announced).toEqual([USER]);
   });
 
   it("rejects invalid registration input before calling the service", async () => {

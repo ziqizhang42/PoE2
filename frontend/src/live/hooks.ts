@@ -1,4 +1,4 @@
-import type { GameSnapshot, LobbyEntry } from "@poe2/protocol";
+import type { GameSnapshot, LobbyEntry, PlayerStatus } from "@poe2/protocol";
 import { useStore } from "zustand";
 
 import { useLiveClient } from "../runtime/context.ts";
@@ -23,6 +23,10 @@ export function useLobbies(): readonly LobbyEntry[] {
 
 export function useGames(): readonly GameSnapshot[] {
   return useLiveState((state) => state.games);
+}
+
+export function usePlayerStatuses(): readonly PlayerStatus[] {
+  return useLiveState((state) => state.playerStatuses);
 }
 
 export function useLiveSynced(): boolean {

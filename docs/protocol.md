@@ -34,6 +34,8 @@ Time-control bounds and precision are exported by the game schema. A timed contr
 | `lobby.snapshot`   | Up to the 100 newest waiting lobbies                        |
 | `game.snapshot`    | One complete waiting, ready-check, active, or finished game |
 | `game.closed`      | Removes a game the user no longer has a seat in             |
+| `players.status`   | Complete volatile presence and activity replacement         |
+| `players.changed`  | Invalidates the durable HTTP player directory               |
 | `session.synced`   | Marks the opening replay complete                           |
 | `command.accepted` | Confirms one committed command by `requestId`               |
 | `command.rejected` | Rejects by `requestId`, code, and safe message              |
@@ -47,11 +49,27 @@ Every connection receives this ordered opening sequence:
 1. `session.ready`
 2. one `lobby.snapshot`
 3. one `game.snapshot` for each waiting, ready-check, or active game in which the user holds a seat
-4. `session.synced`
+4. one `players.status`
+5. `session.synced`
 
 Pushes caused by other users are buffered until the sequence completes. Only `session.synced` makes an omitted game authoritatively absent; `session.ready` arrives before the database reads and is not a completeness marker. If opening state cannot be assembled, the server closes with `1011`.
 
 For an accepted command, acknowledgement is sent only after commit, followed by game messages and then any lobby broadcast. Failure to publish after that point does not turn acceptance into rejection; reconnecting restores committed open state.
+
+## Player presence and activity
+
+`players.status` is a complete replacement containing the union of connected accounts and accounts with current game activity. An omitted account is offline with no activity. A player is online when at least one authenticated WebSocket is open for that account anywhere in the signed-in application; multiple tabs count once. Only the first connection and last disconnection change presence.
+
+Activity comes from authoritative unfinished games, independently of presence:
+
+| Game state                | Directory activity |
+| ------------------------- | ------------------ |
+| `waiting`                 | `open_room`        |
+| `ready_check` or `active` | `in_game`          |
+
+`in_game` wins if an account also owns a waiting room. Disconnecting does not erase activity, so Overall can still describe an offline player's room or game. Replacements follow relevant connection and game-lifecycle commits, including ready-check expiry and game timeout. Reads are serialized so an older replacement cannot overtake a newer one.
+
+`players.changed` carries no data. Registration and every finished rated result emit it so clients invalidate `GET /api/players`; casual results do not change the directory. Protocol version remains 1 because this schema has not been deployed.
 
 ## Snapshot model
 

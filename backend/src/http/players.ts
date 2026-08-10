@@ -3,11 +3,13 @@ import {
   HISTORY_PAGE_LIMIT,
   MAX_HISTORY_PAGE_LIMIT,
   normalizeUsername,
+  PlayerDirectorySchema,
   PlayerErrorResponseSchema,
   PublicPlayerProfileSchema,
   UsernameSchema,
   type PlayerErrorResponse,
 } from "@poe2/protocol";
+import cookie from "@fastify/cookie";
 import type { FastifyError, FastifyPluginAsync, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -17,13 +19,18 @@ import type { HistoryService } from "../game/history-service.js";
 import type { PlayerRepository } from "../player/repository.js";
 import type { RateLimiter } from "../limits/rate-limiter.js";
 import { clientAddressKey } from "./client-address.js";
+import { readSessionUser, type SessionReaderOptions } from "./session.js";
 
+export const PLAYER_DIRECTORY_ROUTE = "/api/players";
 export const PLAYER_ROUTE = "/api/players/:username";
 export const PLAYER_GAMES_ROUTE = "/api/players/:username/games";
 
 export interface PlayersHttpOptions {
   readonly repository: PlayerRepository;
   readonly historyService: HistoryService;
+  readonly session: SessionReaderOptions;
+  /** Authenticated directory reads have their own address budget. */
+  readonly directoryLimiter: RateLimiter;
   readonly readLimiter: RateLimiter;
   /** Separate, tighter budget because history pages materialize many replays. */
   readonly historyLimiter: RateLimiter;
@@ -45,6 +52,10 @@ const RATE_LIMITED: PlayerErrorResponse = {
   code: "rate_limited",
   message: "Too many requests; try again shortly",
 };
+const UNAUTHENTICATED: PlayerErrorResponse = {
+  code: "unauthenticated",
+  message: "Authentication required",
+};
 const INTERNAL_ERROR: PlayerErrorResponse = {
   code: "internal_error",
   message: "The request could not be completed",
@@ -59,6 +70,9 @@ const historyQuerySchema = z.strictObject({
 });
 
 export const playersPlugin: FastifyPluginAsync<PlayersHttpOptions> = async (app, options) => {
+  // Initializes the cookie parser in this independently testable route scope.
+  await app.register(cookie);
+
   app.setErrorHandler<FastifyError>((error, request, reply) => {
     if (error.validation !== undefined) {
       return reply.code(400).send(INVALID_REQUEST);
@@ -84,6 +98,32 @@ export const playersPlugin: FastifyPluginAsync<PlayersHttpOptions> = async (app,
   };
 
   const routes = app.withTypeProvider<ZodTypeProvider>();
+
+  routes.get(
+    PLAYER_DIRECTORY_ROUTE,
+    {
+      schema: {
+        response: {
+          200: PlayerDirectorySchema,
+          401: PlayerErrorResponseSchema,
+          429: PlayerErrorResponseSchema,
+          500: PlayerErrorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const user = await readSessionUser(request, options.session);
+      if (user === null) {
+        return reply.code(401).send(UNAUTHENTICATED);
+      }
+
+      if (!(await spend(options.directoryLimiter, clientAddressKey(request), reply))) {
+        return reply;
+      }
+
+      return options.repository.listDirectory();
+    },
+  );
 
   routes.get(
     PLAYER_ROUTE,

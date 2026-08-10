@@ -32,7 +32,7 @@ export const playerNetworkError = (): PlayerRequestError =>
 export const playerProtocolError = (status: number): PlayerRequestError =>
   new PlayerRequestError({
     kind: "protocol",
-    message: "The server sent a profile this page could not read.",
+    message: "The server sent player data this page could not read.",
     status,
     code: null,
   });

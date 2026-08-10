@@ -1,4 +1,4 @@
-import type { PublicPlayerProfile } from "@poe2/protocol";
+import type { PlayerDirectoryEntry, PublicPlayerProfile } from "@poe2/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FetchLike } from "../http/fetch.ts";
@@ -24,6 +24,15 @@ const PROFILE: PublicPlayerProfile = {
   },
 };
 
+const DIRECTORY: readonly PlayerDirectoryEntry[] = [
+  {
+    id: "e4aa457e-7620-4f14-ae26-6c20f3995ee1",
+    username: "Player_One",
+    rating: 1513,
+    colorPercentile: 72,
+  },
+];
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -42,6 +51,32 @@ async function captureError(operation: Promise<unknown>): Promise<PlayerRequestE
 }
 
 describe("public player client", () => {
+  it("loads the authenticated directory and validates every entry", async () => {
+    const fetch = vi.fn<FetchLike>(async () => jsonResponse(200, DIRECTORY));
+    const controller = new AbortController();
+
+    await expect(createPlayersClient({ fetch }).fetchDirectory(controller.signal)).resolves.toEqual(
+      DIRECTORY,
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/players",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+    );
+  });
+
+  it("rejects a directory entry that leaks a private field", async () => {
+    const fetch = vi.fn<FetchLike>(async () =>
+      jsonResponse(200, [{ ...DIRECTORY[0], ratingDeviation: 80 }]),
+    );
+
+    const error = await captureError(createPlayersClient({ fetch }).fetchDirectory());
+    expect(error.kind).toBe("protocol");
+  });
+
   it("encodes the username, forwards cancellation, and validates the public DTO", async () => {
     const fetch = vi.fn<FetchLike>(async () => jsonResponse(200, PROFILE));
     const controller = new AbortController();

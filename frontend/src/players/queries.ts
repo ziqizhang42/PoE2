@@ -1,4 +1,4 @@
-import type { GameHistoryPage, PublicPlayerProfile } from "@poe2/protocol";
+import type { GameHistoryPage, PlayerDirectoryEntry, PublicPlayerProfile } from "@poe2/protocol";
 import {
   useInfiniteQuery,
   useQuery,
@@ -8,9 +8,22 @@ import {
 
 import { usePlayersClient } from "../runtime/context.ts";
 import type { PlayerRequestError } from "./errors.ts";
-import { playerGamesKey, playerProfileKey } from "./query-keys.ts";
+import { PLAYER_DIRECTORY_KEY, playerGamesKey, playerProfileKey } from "./query-keys.ts";
 
-export { playerGamesKey, playerProfileKey } from "./query-keys.ts";
+export { PLAYER_DIRECTORY_KEY, playerGamesKey, playerProfileKey } from "./query-keys.ts";
+
+export function usePlayerDirectory(): UseQueryResult<
+  readonly PlayerDirectoryEntry[],
+  PlayerRequestError
+> {
+  const client = usePlayersClient();
+  return useQuery({
+    queryKey: PLAYER_DIRECTORY_KEY,
+    queryFn: ({ signal }) => client.fetchDirectory(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
 
 export function usePlayerProfile(
   username: string,

@@ -94,11 +94,14 @@ export type {
 
 export {
   MAX_RATING_HISTORY,
+  PlayerDirectoryEntrySchema,
+  PlayerDirectorySchema,
   PlayerErrorResponseSchema,
   PublicPlayerProfileSchema,
   PublicPlayerStatisticsSchema,
 } from "./player.js";
 export type {
+  PlayerDirectoryEntry,
   PlayerErrorCode,
   PlayerErrorResponse,
   PublicPlayerProfile,
@@ -111,6 +114,8 @@ export { HealthResponseSchema, ReadinessResponseSchema } from "./health.js";
 export type { HealthResponse, ReadinessResponse } from "./health.js";
 
 export {
+  PLAYER_ACTIVITIES,
+  PlayerStatusSchema,
   WS_ERROR_CODES,
   WS_PROTOCOL_VERSION,
   WsClientMessageSchema,
@@ -127,11 +132,15 @@ export {
   WsLobbyCreateMessageSchema,
   WsLobbyJoinMessageSchema,
   WsLobbySnapshotMessageSchema,
+  WsPlayersChangedMessageSchema,
+  WsPlayersStatusMessageSchema,
   WsServerMessageSchema,
   WsSessionReadyMessageSchema,
   WsSessionSyncedMessageSchema,
 } from "./websocket.js";
 export type {
+  PlayerActivity,
+  PlayerStatus,
   WsClientMessage,
   WsCommandAcceptedMessage,
   WsCommandRejectedMessage,
@@ -146,6 +155,8 @@ export type {
   WsLobbyCreateMessage,
   WsLobbyJoinMessage,
   WsLobbySnapshotMessage,
+  WsPlayersChangedMessage,
+  WsPlayersStatusMessage,
   WsServerMessage,
   WsSessionReadyMessage,
   WsSessionSyncedMessage,

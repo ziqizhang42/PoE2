@@ -29,18 +29,18 @@ Keep module initialization free of browser side effects. Tests create a runtime 
 | Data | Owner | Rule |
 | --- | --- | --- |
 | Session | TanStack Query in `auth/` | The session endpoint alone decides whether the browser is signed in. |
-| Public profiles and archives | TanStack Query in `players/` and `games/` | Cache keys contain only resource identity and pagination inputs. |
-| Lobby and open games | Zustand store in `live/` | Store complete server snapshots without re-running game rules. |
+| Player directory, public profiles, and archives | TanStack Query in `players/` and `games/` | Cache keys contain only resource identity and pagination inputs. |
+| Presence, activity, lobby, and open games | Zustand store in `live/` | Store complete server replacements without re-running game rules. |
 | View-only board annotations | `@poe2/rules` selectors | Derive from the current snapshot; do not persist them as authority. |
 | UI preferences and transient controls | Component or provider state | Keep these out of server-backed stores. |
 
 Do not optimistically mutate authoritative game state. A successful command ack means the transaction committed; the following snapshot is the state to render. If a connection is lost before an ack, the result is unknown until reconnect replays server state.
 
-Public profile, history, and replay responses are viewer-independent. Do not put the current session in their query keys. Finishing a game invalidates player queries because a rated result can change rating data and every ranked player's percentile.
+Public profile, history, and replay responses are viewer-independent. Do not put the current session in their query keys. The directory is authenticated but its contents are still viewer-independent, so it also has one shared key. Finishing a game invalidates player queries because a rated result can change rating data and every ranked player's percentile; `players.changed` invalidates the directory specifically after registration or rated results.
 
 ## Live connection
 
-[`live/client.ts`](../frontend/src/live/client.ts) owns one socket and [`live/store.ts`](../frontend/src/live/store.ts) contains its snapshots. The connection is usable only after the exact-version `session.ready` handshake and the final `session.synced` frame. An opening replay replaces old socket state; absence before `session.synced` is not evidence that a game disappeared. A server frame outside the shared schema closes the connection permanently for that page load and asks for a reload rather than retrying an incompatible build.
+[`live/client.ts`](../frontend/src/live/client.ts) owns one socket and [`live/store.ts`](../frontend/src/live/store.ts) contains its snapshots. The connection is usable only after the exact-version `session.ready` handshake and the final `session.synced` frame. An opening replay replaces old socket state, including `players.status`; absence before `session.synced` is not evidence that a game or player status disappeared. A server frame outside the shared schema closes the connection permanently for that page load and asks for a reload rather than retrying an incompatible build.
 
 The session user ID and live-store user ID must match before a screen renders live state. This prevents snapshots retained during a user switch from leaking into the next session. A policy close or refused upgrade causes a session recheck; the WebSocket client does not independently sign the user out.
 
@@ -73,6 +73,8 @@ Interactive behavior must remain usable without a pointer:
 - honor reduced-motion preferences in animation and clock refresh behavior.
 
 Theme selection is owned by `theme/`. The inline bootstrap in [`index.html`](../frontend/index.html) applies the stored or system theme before React paints; keep it behaviorally aligned with the provider when changing theme storage.
+
+The lobby keeps the signed-in **You** card and places the complete **Players** directory beneath it. Its native-radio Online/Overall control defaults to Online. Online filters the HTTP order by socket presence; Overall renders every row and does not add a separate presence marker. Each row links the canonical username, colors that link from `colorPercentile`, and prints the numeric rating. The list has no ranks, pagination, fixed-height scroller, or special current-player row, and owns explicit pending, empty, failure, and retry states.
 
 ## Tests
 

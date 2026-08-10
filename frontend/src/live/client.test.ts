@@ -288,6 +288,34 @@ describe("server messages", () => {
     expect(harness.client.store.getState().lobbies).toEqual([lobbyEntry()]);
   });
 
+  it("replaces player presence and activity exactly as sent", () => {
+    const harness = connected();
+    const players = [
+      { id: USER_ONE.id, online: true, activity: "open_room" as const },
+      { id: USER_TWO.id, online: false, activity: "in_game" as const },
+    ];
+
+    harness.deliver({ type: "players.status", players });
+    expect(harness.client.store.getState().playerStatuses).toEqual(players);
+
+    harness.deliver({
+      type: "players.status",
+      players: [{ id: USER_ONE.id, online: true, activity: null }],
+    });
+    expect(harness.client.store.getState().playerStatuses).toEqual([
+      { id: USER_ONE.id, online: true, activity: null },
+    ]);
+  });
+
+  it("invalidates the directory when durable player data changed", () => {
+    const onPlayerDirectoryStale = vi.fn<() => void>();
+    const harness = connected({ onPlayerDirectoryStale });
+
+    harness.deliver({ type: "players.changed" });
+
+    expect(onPlayerDirectoryStale).toHaveBeenCalledTimes(1);
+  });
+
   it("upserts a game snapshot by id", () => {
     const harness = connected();
     harness.clock.advance(1_250);
@@ -324,12 +352,17 @@ describe("server messages", () => {
   it("replaces everything the previous socket held once a reconnect is confirmed", () => {
     const harness = connected();
     harness.deliver({ type: "game.snapshot", game: waitingGame() });
+    harness.deliver({
+      type: "players.status",
+      players: [{ id: USER_ONE.id, online: true, activity: "open_room" }],
+    });
 
     harness.close(ABNORMAL_CLOSURE);
     harness.fireTimers();
     harness.deliver(sessionReady());
 
     expect(harness.client.store.getState().games).toEqual([]);
+    expect(harness.client.store.getState().playerStatuses).toEqual([]);
     expect(harness.client.store.getState().synced).toBe(false);
     expect(harness.client.store.getState().status).toBe("reconnecting");
 

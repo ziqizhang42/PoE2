@@ -126,6 +126,19 @@ describe("pending connections", () => {
 });
 
 describe("connection hub", () => {
+  it("reports only the first and last connection for a user", () => {
+    const hub = createConnectionHub();
+    const first = fakeSocket();
+    const second = fakeSocket();
+
+    expect(hub.add("user-1", first)).toBe(true);
+    expect(hub.add("user-1", second)).toBe(false);
+    expect(hub.connectedUserIds()).toEqual(["user-1"]);
+    expect(hub.remove("user-1", first)).toBe(false);
+    expect(hub.remove("user-1", second)).toBe(true);
+    expect(hub.connectedUserIds()).toEqual([]);
+  });
+
   it("delivers to every socket one user has open", () => {
     const hub = createConnectionHub();
     const first = fakeSocket();
@@ -177,6 +190,19 @@ describe("connection hub", () => {
     for (const socket of [first, second, third]) {
       expect(received(socket)).toEqual([LOBBIES]);
     }
+  });
+
+  it("can omit the opening socket from a replacement broadcast", () => {
+    const hub = createConnectionHub();
+    const opening = fakeSocket();
+    const existing = fakeSocket();
+
+    join(hub, "user-1", opening);
+    join(hub, "user-2", existing);
+    hub.broadcast(LOBBIES, opening);
+
+    expect(opening.sent).toEqual([]);
+    expect(received(existing)).toEqual([LOBBIES]);
   });
 
   it("forgets a socket once it is removed", () => {

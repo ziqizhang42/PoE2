@@ -1,6 +1,6 @@
 /** Stores server-pushed live state; rules and authentication remain elsewhere. */
 
-import type { GameSnapshot, LobbyEntry, WsErrorCode } from "@poe2/protocol";
+import type { GameSnapshot, LobbyEntry, PlayerStatus, WsErrorCode } from "@poe2/protocol";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 export type LiveStatus =
@@ -23,6 +23,7 @@ export interface LiveState {
   readonly userId: string | null;
   readonly lobbies: readonly LobbyEntry[];
   readonly games: readonly GameSnapshot[];
+  readonly playerStatuses: readonly PlayerStatus[];
   readonly gameReceivedAtMs: Readonly<Record<string, number>>;
   /** Until true, an absent game may still be in the opening sequence. */
   readonly synced: boolean;
@@ -38,6 +39,7 @@ export const INITIAL_LIVE_STATE: LiveState = {
   userId: null,
   lobbies: [],
   games: [],
+  playerStatuses: [],
   gameReceivedAtMs: {},
   synced: false,
   lastRejection: null,

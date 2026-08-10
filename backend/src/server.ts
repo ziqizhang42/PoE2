@@ -30,11 +30,13 @@ import { createHistoryService } from "./game/history-service.js";
 import { createRatingReader } from "./rating/reader.js";
 import { authPlugin } from "./http/auth.js";
 import { gamesPlugin } from "./http/games.js";
+import { publishAbandonedGame, publishFinishedGame } from "./http/game-publication.js";
 import { readinessPlugin } from "./http/health.js";
 import { playersPlugin } from "./http/players.js";
 import { createConnectionHub } from "./http/ws-hub.js";
 import { registerWebSocket } from "./http/ws.js";
 import { createPlayerRepository } from "./player/repository.js";
+import { createPlayerStatusService } from "./player/status-service.js";
 import type { GameService } from "./game/service.js";
 
 /** Reads settings needed before Fastify, including its immutable trustProxy option. */
@@ -75,8 +77,11 @@ try {
   const wsLimits = createWebSocketLimits(config.webSocketLimits);
   const historyReadLimiter = createHistoryReadLimiter(config.webSocketLimits);
   const profileReadLimiter = createPlayerReadLimiter(config.webSocketLimits);
+  const directoryReadLimiter = createPlayerReadLimiter(config.webSocketLimits);
   const replayReadLimiter = createPlayerReadLimiter(config.webSocketLimits);
   const hub = createConnectionHub();
+  const playerRepository = createPlayerRepository(database.db);
+  const playerStatusService = createPlayerStatusService(playerRepository, hub);
 
   // Finish and rating changes share the repository transaction.
   const gameRepository = createGameRepository(database.db, {
@@ -100,22 +105,17 @@ try {
     clock: systemClock,
     scheduler: systemScheduler,
     process: (gameId, expectedDeadline) => gameService.processDeadline(gameId, expectedDeadline),
-    onFinished: (game) => {
-      const message = { type: "game.snapshot" as const, game };
-      hub.send(game.players.playerOne.id, message);
-      if (game.players.playerTwo !== null) {
-        hub.send(game.players.playerTwo.id, message);
-      }
-    },
-    onAbandoned: async (game, releasedPlayerId) => {
-      // The reopened snapshot omits the released player, who instead gets closed.
-      hub.send(game.players.playerOne.id, { type: "game.snapshot", game });
-      hub.send(releasedPlayerId, { type: "game.closed", gameId: game.id });
-      hub.broadcast({
-        type: "lobby.snapshot",
-        lobbies: await gameService.listWaitingLobbies(),
-      });
-    },
+    onFinished: (game) => publishFinishedGame({ hub, playerStatusService }, game),
+    onAbandoned: (game, releasedPlayerId) =>
+      publishAbandonedGame(
+        {
+          hub,
+          playerStatusService,
+          listWaitingLobbies: () => gameService.listWaitingLobbies(),
+        },
+        game,
+        releasedPlayerId,
+      ),
     onError: (error) => {
       app.log.error({ err: error }, "deadline supervision failed");
     },
@@ -152,6 +152,9 @@ try {
   app.register(authPlugin, {
     ...config.auth,
     service: authService,
+    onRegistered: () => {
+      hub.broadcast({ type: "players.changed" });
+    },
   });
 
   const historyService = createHistoryService(gameRepository, createRatingReader(database.db));
@@ -162,8 +165,10 @@ try {
   });
 
   app.register(playersPlugin, {
-    repository: createPlayerRepository(database.db),
+    repository: playerRepository,
     historyService,
+    session: { sessionCookieName: config.auth.sessionCookieName, authService },
+    directoryLimiter: directoryReadLimiter,
     readLimiter: profileReadLimiter,
     // History reads are costlier than aggregate profile reads.
     historyLimiter: historyReadLimiter,
@@ -175,6 +180,7 @@ try {
     authService,
     gameService,
     hub,
+    playerStatusService,
     // In-memory budgets reset on process restart.
     limits: wsLimits,
   });

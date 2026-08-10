@@ -18,6 +18,8 @@ import type { AuthConfig } from "../config/auth.js";
 
 export interface AuthHttpOptions extends AuthConfig {
   readonly service: AuthService;
+  /** Announces the durable account only after registration has committed. */
+  readonly onRegistered?: (user: AuthSessionResponse["user"]) => void;
 }
 
 /**
@@ -199,6 +201,12 @@ export const authPlugin: FastifyPluginAsync<AuthHttpOptions> = async (app, optio
       const response: AuthSessionResponse = {
         user: result.session.user,
       };
+      try {
+        options.onRegistered?.(response.user);
+      } catch (error) {
+        // Registration is already durable; a transient push failure cannot undo it.
+        request.log.error({ err: error }, "could not announce registered player");
+      }
       return reply.code(201).send(response);
     },
   );

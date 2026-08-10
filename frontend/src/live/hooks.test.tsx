@@ -20,6 +20,7 @@ import {
   useLiveStatus,
   useLiveUserId,
   useLobbies,
+  usePlayerStatuses,
   useReconnectAttempts,
 } from "./hooks.ts";
 
@@ -64,6 +65,7 @@ describe("live hooks", () => {
       () => ({
         lobbies: useLobbies(),
         games: useGames(),
+        players: usePlayerStatuses(),
         rejection: useLastLiveRejection(),
       }),
       { wrapper: wrapperFor(runtime) },
@@ -73,12 +75,16 @@ describe("live hooks", () => {
       runtime.live.store.setState({
         lobbies: [lobbyEntry()],
         games: [waitingGame()],
+        playerStatuses: [{ id: USER_ONE.id, online: true, activity: "open_room" }],
         lastRejection: { requestId: null, code: "invalid_message", message: "bad frame" },
       });
     });
 
     expect(result.current.lobbies).toEqual([lobbyEntry()]);
     expect(result.current.games).toEqual([waitingGame()]);
+    expect(result.current.players).toEqual([
+      { id: USER_ONE.id, online: true, activity: "open_room" },
+    ]);
     expect(result.current.rejection?.code).toBe("invalid_message");
   });
 

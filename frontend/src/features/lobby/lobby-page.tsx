@@ -30,6 +30,7 @@ import { useCommandRunner } from "../use-command-runner.ts";
 import { describeCommandFailure } from "./command-failure.ts";
 import { CREATE_KEY, joinKey } from "./command-keys.ts";
 import { OpenLobbiesPanel } from "./open-lobbies-panel.tsx";
+import { PlayerDirectoryCard } from "./player-directory-card.tsx";
 import { TimeControlFieldset } from "./time-control-field.tsx";
 import {
   DEFAULT_TIME_CONTROL_FIELDS,
@@ -174,8 +175,7 @@ export function LobbyPage() {
             <p className={EYEBROW}>Lobby</p>
             <h1 className={H_XL}>Open a seat, or take one</h1>
             <p className={NOTE}>
-              A room is one open seat. It stays up until another player takes it or you withdraw it,
-              and the list below is pushed by the server rather than polled.
+              A room is one open seat. It stays up until another player takes it or you withdraw it.
             </p>
           </div>
           <Button
@@ -360,6 +360,7 @@ export function LobbyPage() {
             <PlayerLink username={viewer.username} />
           </p>
         </section>
+        <PlayerDirectoryCard statusesReady={synced} />
       </div>
     </div>
   );
