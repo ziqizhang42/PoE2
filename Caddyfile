@@ -1,0 +1,50 @@
+{
+	admin localhost:2019
+}
+
+{$DOMAIN} {
+	log {
+		output stdout
+		format json
+	}
+
+	encode zstd gzip
+
+	header {
+		-X-Powered-By
+		-Server
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	handle /api/* {
+		header Cache-Control "no-store"
+		reverse_proxy backend:3000 {
+			stream_close_delay 5m
+		}
+	}
+
+	handle /health {
+		reverse_proxy backend:3000
+	}
+
+	handle /ready {
+		reverse_proxy backend:3000
+	}
+
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	handle {
+		root * /srv
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

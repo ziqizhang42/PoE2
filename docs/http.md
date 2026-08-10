@@ -13,7 +13,8 @@ The shared Zod schemas are the response contract:
 
 | Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/health` | public | Process health |
+| `GET` | `/health` | public | Process liveness |
+| `GET` | `/ready` | public | Process and PostgreSQL readiness |
 | `POST` | `/api/auth/register` | public | Create an account and session |
 | `POST` | `/api/auth/login` | public | Create a session |
 | `GET` | `/api/auth/session` | cookie | Read the current session |
@@ -23,6 +24,8 @@ The shared Zod schemas are the response contract:
 | `GET` | `/api/games/:gameId` | public | One finished game and its move record |
 
 Route registration lives in [`backend/src/http`](../backend/src/http).
+
+`/health` does not touch a dependency and remains available for liveness checks. `/ready` executes a minimal PostgreSQL query; it returns `{ status: "ok" }` with `200` or `{ status: "unavailable" }` with `503`. Neither response exposes database details, and both disable caching.
 
 ## Authentication
 

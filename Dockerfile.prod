@@ -1,0 +1,78 @@
+FROM node:26-trixie-slim AS build
+
+ARG COREPACK_VERSION=0.35.0
+ARG PNPM_VERSION=11.18.0
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    g++ \
+    git \
+    make \
+    python3 \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global "corepack@${COREPACK_VERSION}" \
+  && corepack enable pnpm \
+  && corepack install --global "pnpm@${PNPM_VERSION}"
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+COPY packages/protocol/package.json packages/protocol/package.json
+COPY packages/rules/package.json packages/rules/package.json
+
+RUN --mount=type=cache,id=poe2-pnpm,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm run build
+
+# pnpm's legacy deploy implementation is required because this workspace does
+# not inject workspace packages. Keep production and migration deployment in
+# separate stages: a production-only deploy mutates pnpm's install-mode state.
+FROM build AS backend-deploy
+RUN pnpm --filter @poe2/backend deploy --prod --legacy /opt/backend
+
+FROM build AS migrate-deploy
+RUN pnpm --filter @poe2/backend deploy --legacy /opt/migrate
+
+FROM node:26-trixie-slim AS backend
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
+WORKDIR /app
+
+COPY --from=backend-deploy --chown=node:node /opt/backend ./
+
+USER node
+
+EXPOSE 3000
+STOPSIGNAL SIGTERM
+
+CMD ["node", "dist/server.js"]
+
+FROM node:26-trixie-slim AS migrate
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=migrate-deploy --chown=node:node /opt/migrate ./
+
+USER node
+
+CMD ["./node_modules/.bin/drizzle-kit", "migrate", "--config", "drizzle.config.ts"]
+
+FROM caddy:2-alpine AS web
+
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/frontend/dist /srv

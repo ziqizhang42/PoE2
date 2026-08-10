@@ -1,6 +1,6 @@
 # Developer guide
 
-The supported local workflow is Docker Compose. It pins Node.js, pnpm, PostgreSQL, and native build tools; host Node installations are not part of the development contract. Production deployment is not defined yet, and the Compose file should not be treated as a production topology.
+The supported local workflow is Docker Compose. It pins Node.js, pnpm, PostgreSQL, and native build tools; host Node installations are not part of the development contract. `compose.yaml` remains development-only; production uses [`compose.prod.yaml`](../compose.prod.yaml) and the [deployment runbook](./deploy.md).
 
 ## Documentation map
 
@@ -9,6 +9,7 @@ The supported local workflow is Docker Compose. It pins Node.js, pnpm, PostgreSQ
 - [HTTP API](./http.md): authentication and public read endpoints.
 - [Ratings](./rating.md): rating policy, persistence, decay, and ladder entry.
 - [Frontend](./ui.md): browser architecture and state ownership.
+- [Deployment](./deploy.md): the single-VPS production topology and runbook.
 
 Schemas, defaults, error unions, and component behavior belong in source. These guides cover only workflows and cross-cutting constraints that are costly to rediscover.
 
@@ -126,7 +127,7 @@ For subsystem boundaries, start at:
 
 Set overrides in the environment of the Compose command. If the frontend port changes, its WebSocket origin in `compose.yaml` changes with it.
 
-Vite proxies `/api`, `/api/ws`, and `/health` to the backend. It appends the client address, and the Compose backend trusts exactly one positional proxy hop. That is safe only while the published backend port remains loopback-only: a client connecting directly is itself the trusted hop and can forge forwarding headers. A production proxy trust policy must be designed with the eventual network topology.
+Vite proxies `/api`, `/api/ws`, `/health`, and `/ready` to the backend. It appends the client address, and the Compose backend trusts exactly one positional proxy hop. That is safe only while the published backend port remains loopback-only: a client connecting directly is itself the trusted hop and can forge forwarding headers. Production uses Caddy as the sole positional hop and does not publish the backend port.
 
 WebSocket upgrades carry cookies but are not protected by the browser's same-origin policy. `WEBSOCKET_ALLOWED_ORIGINS` is therefore an explicit origin allowlist; wildcards are rejected and production requires a value.
 
@@ -145,7 +146,7 @@ Environment parsing fails at startup on invalid values. Read defaults and bounds
 | Active deadline capacity | [`config/deadline.ts`](../backend/src/config/deadline.ts) |
 | Rating periods and decay worker | [`config/rating-decay.ts`](../backend/src/config/rating-decay.ts) |
 
-`DATABASE_URL` is required for the backend and Drizzle commands. Compose supplies development and test values. Production secrets, TLS, proxying, observability, and process supervision remain deployment work.
+`DATABASE_URL` is required for the backend and Drizzle commands. Compose supplies development and test values. Production values and operational requirements are defined in the [deployment runbook](./deploy.md).
 
 ## Database migrations
 

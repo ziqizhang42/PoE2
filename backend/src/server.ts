@@ -15,6 +15,7 @@ import { readServerConfig } from "./config/server.js";
 import { readWebSocketConfig } from "./config/websocket.js";
 import { readWebSocketLimitsConfig } from "./config/ws-limits.js";
 import { createDatabaseClient } from "./db/client.js";
+import { installGracefulShutdown } from "./graceful-shutdown.js";
 import { createDeadlineService } from "./game/deadline-service.js";
 import { createHistoryReadLimiter } from "./limits/history-read-limiter.js";
 import { systemClock, systemScheduler } from "./limits/clock.js";
@@ -29,6 +30,7 @@ import { createHistoryService } from "./game/history-service.js";
 import { createRatingReader } from "./rating/reader.js";
 import { authPlugin } from "./http/auth.js";
 import { gamesPlugin } from "./http/games.js";
+import { readinessPlugin } from "./http/health.js";
 import { playersPlugin } from "./http/players.js";
 import { createConnectionHub } from "./http/ws-hub.js";
 import { registerWebSocket } from "./http/ws.js";
@@ -57,9 +59,11 @@ function readConfig(environment: Readonly<Record<string, string | undefined>>) {
 const config = readConfig(process.env);
 
 const app = buildApp({ logger: true, trustProxy: config.server.instance.trustProxy });
+installGracefulShutdown(app);
 
 try {
   const database = createDatabaseClient(config.database);
+  app.register(readinessPlugin, { check: database.checkReady });
   const hasher = createPasswordHasher(createKdfExecutor(config.kdf));
   const authService = createAuthService(createAuthRepository(database.db), hasher, {
     onRecoveredError: (error) => {

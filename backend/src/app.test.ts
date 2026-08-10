@@ -37,6 +37,7 @@ describe("buildApp", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.headers["content-type"]).toMatch(/application\/json/);
+      expect(response.headers["cache-control"]).toBe("no-store");
       expect(HealthResponseSchema.safeParse(response.json()).success).toBe(true);
     } finally {
       await app.close();

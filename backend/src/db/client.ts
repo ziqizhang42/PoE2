@@ -16,6 +16,7 @@ export type DatabaseExecutor = PgDatabase<PostgresJsQueryResultHKT, typeof schem
 
 export interface DatabaseClient {
   readonly db: Database;
+  checkReady(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -24,6 +25,9 @@ export function createDatabaseClient(config: DatabaseConfig): DatabaseClient {
 
   return {
     db: drizzle(queryClient, { schema }),
+    checkReady: async () => {
+      await queryClient`select 1`;
+    },
     close: async () => {
       await queryClient.end();
     },

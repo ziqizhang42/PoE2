@@ -107,8 +107,8 @@ export type {
   RatingPoint,
 } from "./player.js";
 
-export { HealthResponseSchema } from "./health.js";
-export type { HealthResponse } from "./health.js";
+export { HealthResponseSchema, ReadinessResponseSchema } from "./health.js";
+export type { HealthResponse, ReadinessResponse } from "./health.js";
 
 export {
   WS_ERROR_CODES,

@@ -22,6 +22,11 @@ export default defineConfig({
         target: backendOrigin,
         xfwd: true,
       },
+      "/ready": {
+        changeOrigin: true,
+        target: backendOrigin,
+        xfwd: true,
+      },
     },
     strictPort: true,
   },

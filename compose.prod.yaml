@@ -1,0 +1,140 @@
+name: poe2-prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-poe2}
+      POSTGRES_USER: ${POSTGRES_USER:-poe2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - private
+    shm_size: 128mb
+    stop_grace_period: 1m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+
+  migrate:
+    image: poe2-migrate:${APP_VERSION:?APP_VERSION is required}
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: migrate
+    restart: "no"
+    init: true
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-poe2}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-poe2}"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  backend:
+    image: poe2-backend:${APP_VERSION:?APP_VERSION is required}
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: backend
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      TRUST_PROXY_HOPS: "1"
+      WEBSOCKET_ALLOWED_ORIGINS: "https://${DOMAIN:?DOMAIN is required}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-poe2}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-poe2}"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then((response) => process.exit(response.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging: *default-logging
+
+  caddy:
+    image: poe2-web:${APP_VERSION:?APP_VERSION is required}
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: web
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+      - private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    logging: *default-logging
+
+networks:
+  edge:
+  private:
+    internal: true
+
+volumes:
+  caddy-config:
+  caddy-data:
+  postgres-data:

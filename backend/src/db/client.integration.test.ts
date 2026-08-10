@@ -25,6 +25,10 @@ const database = createDatabaseClient(readDatabaseConfig(process.env));
 afterAll(() => database.close());
 
 describe("database client", () => {
+  it("passes its readiness check while PostgreSQL accepts queries", async () => {
+    await expect(database.checkReady()).resolves.toBeUndefined();
+  });
+
   it("connects to the isolated PostgreSQL 18 database", async () => {
     const rows = await database.db.execute(sql`
       select
