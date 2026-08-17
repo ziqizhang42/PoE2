@@ -76,17 +76,15 @@ type BlobProps = {
 };
 
 /* Player 2's solid fill needs dark ink to meet contrast. */
-const FILLS: Record<Player, { lead: string; trail: string; disc: string; glow: string }> = {
+const FILLS: Record<Player, { lead: string; trail: string; glow: string }> = {
   1: {
     lead: "bg-pen-1 text-on-fill",
     trail: "bg-pen-1-soft text-pen-1-text",
-    disc: "bg-pen-1 text-on-fill",
     glow: "[--glow-ink:var(--pen-1)]",
   },
   2: {
     lead: "bg-pen-2 text-on-pen-2",
     trail: "bg-pen-2-soft text-pen-2-text",
-    disc: "bg-pen-2 text-on-pen-2",
     glow: "[--glow-ink:var(--pen-2)]",
   },
 };
@@ -111,14 +109,6 @@ function Blob({
       }`}
     >
       <dt className="flex min-w-0 items-center gap-2 text-sm">
-        <span
-          aria-hidden="true"
-          className={`num flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs leading-none font-semibold ${
-            leads ? "border border-current" : fill.disc
-          }`}
-        >
-          {player}
-        </span>
         <span className="min-w-0 truncate">{name}</span>
         {isViewer ? <span className="shrink-0 text-xs">you</span> : null}
       </dt>

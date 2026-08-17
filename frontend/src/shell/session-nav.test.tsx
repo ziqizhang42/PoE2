@@ -27,6 +27,7 @@ describe("SessionNav", () => {
 
     expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/signin");
     expect(screen.queryByRole("link", { name: "Lobby" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Analysis" })).toHaveAttribute("href", "/analysis");
   });
 
   it("signs out and returns to the landing page", async () => {

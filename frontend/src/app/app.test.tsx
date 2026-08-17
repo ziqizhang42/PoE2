@@ -48,6 +48,19 @@ describe("App routing", () => {
     expect(screen.queryByRole("link", { name: "Enter the lobby" })).not.toBeInTheDocument();
   });
 
+  it("opens the public analysis board without a session", async () => {
+    const runtime = createTestRuntime({
+      authClient: createFakeAuthClient({ fetchSession: async () => null }),
+    });
+
+    renderApp(runtime, "/analysis");
+
+    expect(
+      await screen.findByRole("heading", { name: "Analysis board", level: 1 }),
+    ).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/analysis");
+  });
+
   it("offers no call to action until the session is settled", async () => {
     const runtime = createTestRuntime({
       authClient: createFakeAuthClient({ fetchSession: () => new Promise(() => {}) }),
@@ -181,6 +194,17 @@ describe("document titles", () => {
 
     await screen.findByRole("heading", { name: "Open a seat, or take one" });
     expect(document.title).toBe(titleFor("/lobby"));
+  });
+
+  it("names the analysis board", async () => {
+    const runtime = createTestRuntime({
+      authClient: createFakeAuthClient({ fetchSession: async () => null }),
+    });
+
+    renderApp(runtime, "/analysis");
+
+    await screen.findByRole("heading", { name: "Analysis board" });
+    expect(document.title).toBe(titleFor("/analysis"));
   });
 
   it("names the game without naming the game", async () => {

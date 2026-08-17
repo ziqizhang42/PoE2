@@ -3,7 +3,7 @@ import type { ComponentPropsWithoutRef } from "react";
 export const CHIP_GROUP = "inline-flex flex-wrap gap-1 rounded-full bg-sunken p-1";
 
 const CHIP =
-  "inline-flex cursor-pointer items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium whitespace-nowrap text-ink-2 transition-[background-color,color,box-shadow] duration-150 hover:text-ink has-[:checked]:bg-surface has-[:checked]:text-ink has-[:checked]:shadow-lift has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-pen-1 has-[:disabled]:pointer-events-none has-[:disabled]:opacity-55";
+  "toggle-chip inline-flex cursor-pointer items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium whitespace-nowrap text-ink-2 transition-[background-color,color,box-shadow] duration-150 hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-pen-1 has-[:disabled]:pointer-events-none has-[:disabled]:opacity-55";
 
 type ToggleChipProps = Omit<ComponentPropsWithoutRef<"input">, "className"> & {
   label: string;

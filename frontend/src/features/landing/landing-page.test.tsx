@@ -202,7 +202,7 @@ describe("the landing page's demonstration", () => {
         .filter((href): href is string => href !== null);
 
       for (const href of targets) {
-        expect(href).toMatch(/^(#main|\/|\/signin(\?mode=register)?|\/lobby)$/);
+        expect(href).toMatch(/^(#main|\/|\/analysis|\/signin(\?mode=register)?|\/lobby)$/);
       }
     });
   });

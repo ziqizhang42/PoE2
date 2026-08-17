@@ -12,7 +12,12 @@ import {
 
 type LeadStripProps = {
   progression: Progression;
+  /** Ply described by the selected-position marker and accessible label. */
   currentPly: number;
+  /** Last ply drawn. Defaults to the selected ply for live or editable lines. */
+  visibleThroughPly?: number;
+  /** Last ply on the horizontal axis. Defaults to the board's full 49-move capacity. */
+  axisFinalPly?: number;
   /** True only when the current position is the full-board result. */
   boardFull: boolean;
 };
@@ -23,8 +28,15 @@ const MIN_BAR_PERCENT = 8;
  * Lead sparkline: direction conveys the leader without color, while height is
  * scaled to this game's peak. Its single image label avoids dozens of announcements.
  */
-export function LeadStrip({ progression, currentPly, boardFull }: LeadStripProps) {
+export function LeadStrip({
+  progression,
+  currentPly,
+  visibleThroughPly = currentPly,
+  axisFinalPly = CELL_COUNT,
+  boardFull,
+}: LeadStripProps) {
   const description = describeProgression(progression, currentPly, boardFull);
+  const renderedFinalPly = Math.max(currentPly, visibleThroughPly, axisFinalPly);
 
   return (
     <div
@@ -33,12 +45,13 @@ export function LeadStrip({ progression, currentPly, boardFull }: LeadStripProps
       className="relative flex h-16 gap-px rounded-sm bg-sunken px-1 py-1"
     >
       <span aria-hidden="true" className="absolute inset-x-1 top-1/2 h-px bg-line" />
-      {Array.from({ length: CELL_COUNT + 1 }, (_unused, ply) => (
+      {Array.from({ length: renderedFinalPly + 1 }, (_unused, ply) => (
         <Segment
           key={ply}
           ply={ply}
           progression={progression}
           currentPly={currentPly}
+          visibleThroughPly={visibleThroughPly}
           peak={progression.peakHalfPoints}
         />
       ))}
@@ -62,12 +75,13 @@ type SegmentProps = {
   ply: number;
   progression: Progression;
   currentPly: number;
+  visibleThroughPly: number;
   peak: number;
 };
 
-function Segment({ ply, progression, currentPly, peak }: SegmentProps) {
+function Segment({ ply, progression, currentPly, visibleThroughPly, peak }: SegmentProps) {
   // Future plies are absent, not tied.
-  if (ply > currentPly) {
+  if (ply > visibleThroughPly) {
     return <span aria-hidden="true" className="min-w-0 flex-1" />;
   }
 

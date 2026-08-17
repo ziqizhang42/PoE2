@@ -185,6 +185,97 @@
   opacity: calc(var(--run-o-base) + var(--run-o-step) * var(--run-pow));
 }
 
+/* Surface actions need an actual edge when they sit on a surface card. Pressed
+   choices use the primary tint and border instead of relying on a faint lift. */
+.button-surface {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ink-3) 42%, var(--surface)),
+    var(--lift);
+}
+
+.button-surface:hover {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ink-3) 62%, var(--surface)),
+    var(--lift-2);
+}
+
+.button-control[aria-pressed="true"],
+.selected-control,
+.toggle-chip:has(> input:checked) {
+  color: var(--pen-1-text);
+  background-color: var(--pen-1-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--pen-1),
+    var(--lift);
+}
+
+.button-control[aria-pressed="true"]:hover,
+.selected-control:hover,
+.toggle-chip:has(> input:checked):hover {
+  color: var(--pen-1-text);
+  background-color: color-mix(in srgb, var(--pen-1) 20%, var(--surface));
+  box-shadow:
+    inset 0 0 0 1px var(--pen-1),
+    var(--lift-2);
+}
+
+/* Engine ranks use the root player's hue; lower-ranked lines recede without
+   making the independently selected line look like a different player. */
+.engine-candidate-rank {
+  --candidate-color: var(--pen-1);
+  --candidate-on-solid: var(--on-fill);
+  --candidate-strength: 24%;
+  --candidate-border-strength: 38%;
+
+  color: var(--ink);
+  border-color: color-mix(
+    in srgb,
+    var(--candidate-color) var(--candidate-border-strength),
+    var(--line)
+  );
+  background-color: color-mix(
+    in srgb,
+    var(--candidate-color) var(--candidate-strength),
+    var(--surface)
+  );
+}
+
+.engine-candidate-rank[data-root-player="2"] {
+  --candidate-color: var(--pen-2);
+  --candidate-on-solid: var(--on-pen-2);
+}
+
+.engine-candidate-rank[data-engine-rank="1"] {
+  --candidate-strength: 100%;
+  --candidate-border-strength: 100%;
+  color: var(--candidate-on-solid);
+}
+
+.engine-candidate-rank[data-engine-rank="2"] {
+  --candidate-strength: 72%;
+  --candidate-border-strength: 80%;
+}
+
+.engine-candidate-rank[data-engine-rank="3"] {
+  --candidate-strength: 52%;
+  --candidate-border-strength: 64%;
+}
+
+.engine-candidate-rank[data-engine-rank="4"] {
+  --candidate-strength: 36%;
+  --candidate-border-strength: 50%;
+}
+
+.engine-candidate-rank[data-engine-rank="5"] {
+  --candidate-strength: 24%;
+  --candidate-border-strength: 38%;
+}
+
+.engine-candidate-rank[data-selected="true"] {
+  outline: 2px solid color-mix(in srgb, var(--candidate-color) 72%, var(--ink));
+  outline-offset: 1px;
+}
+
 /* ViewBox units keep run labels near 13px at the board's maximum rendered size. */
 @utility run-mark {
   font-family: var(--font-mono);

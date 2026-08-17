@@ -1,7 +1,7 @@
 import { NavLink } from "react-router";
 
 import { useSession } from "../auth/queries.ts";
-import { LOBBY_PATH, playerPath } from "../app/routes.ts";
+import { ANALYSIS_PATH, LOBBY_PATH, playerPath } from "../app/routes.ts";
 import { describeConnection } from "../features/connection.ts";
 import { useLiveStatus } from "../live/hooks.ts";
 import { ThemeToggle } from "../theme/theme-toggle.tsx";
@@ -20,12 +20,15 @@ export function TopBar() {
   const signedIn = user !== null;
   const connection = describeConnection(liveStatus, 0);
 
-  const navLinks = signedIn
-    ? [
-        { to: LOBBY_PATH, label: "Lobby" },
-        { to: playerPath(user.username), label: "Profile" },
-      ]
-    : [];
+  const navLinks = [
+    ...(signedIn
+      ? [
+          { to: LOBBY_PATH, label: "Lobby" },
+          { to: playerPath(user.username), label: "Profile" },
+        ]
+      : []),
+    { to: ANALYSIS_PATH, label: "Analysis" },
+  ];
 
   return (
     <header className="sticky top-0 z-30 border-b border-line/70 bg-field/85 backdrop-blur-md backdrop-saturate-150">
@@ -47,7 +50,7 @@ export function TopBar() {
               to={link.to}
               className={({ isActive }) =>
                 isActive
-                  ? `${LINK} bg-surface text-ink shadow-lift`
+                  ? `${LINK} selected-control`
                   : `${LINK} text-ink-2 hover:bg-surface/70 hover:text-ink`
               }
             >

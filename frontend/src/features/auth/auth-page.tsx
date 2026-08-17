@@ -52,7 +52,7 @@ export function AuthPage() {
             }}
             className={
               mode === "login"
-                ? `${SEGMENT} bg-surface text-ink shadow-lift`
+                ? `${SEGMENT} selected-control`
                 : `${SEGMENT} text-ink-2 hover:text-ink`
             }
           >
@@ -66,7 +66,7 @@ export function AuthPage() {
             }}
             className={
               mode === "register"
-                ? `${SEGMENT} bg-surface text-ink shadow-lift`
+                ? `${SEGMENT} selected-control`
                 : `${SEGMENT} text-ink-2 hover:text-ink`
             }
           >

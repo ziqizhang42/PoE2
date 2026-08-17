@@ -1,8 +1,10 @@
-import { formatSquare, squareIndex } from "@poe2/rules";
+import { formatSquare, PLAYER_ONE, PLAYER_TWO, squareIndex } from "@poe2/rules";
 
 import { BoardFrame } from "./board-frame.tsx";
 import { FILES, pieceAt, RANKS, sameSquare, topRunMarks } from "./board-model.ts";
 import { Counter } from "./counter.tsx";
+import { EngineCandidateMarks } from "./engine-candidate-marks.tsx";
+import type { CandidatePlacementGroup } from "./engine-candidate.ts";
 import { RunBands, RunMarks } from "./run-bands.tsx";
 import type { ReplayFrame } from "./replay-script.ts";
 
@@ -10,17 +12,27 @@ import type { ReplayFrame } from "./replay-script.ts";
 export function ReplayBoard({
   frame,
   showRunValues,
+  candidateGroups = [],
+  selectedRank = 1,
 }: {
   readonly frame: ReplayFrame;
   readonly showRunValues: boolean;
+  readonly candidateGroups?: readonly CandidatePlacementGroup[];
+  readonly selectedRank?: number;
 }) {
   const lastMove = frame.moves.at(-1) ?? null;
   const marks = showRunValues ? topRunMarks(frame.runs.runs) : [];
+  const rootPlayer = frame.ply % 2 === 0 ? PLAYER_ONE : PLAYER_TWO;
 
-  const label =
+  const positionLabel =
     lastMove === null
       ? "The board before the first move."
       : `The board after ply ${String(frame.ply)}, ${formatSquare(lastMove)}. Player 1 has ${String(frame.scores.playerOne)}, Player 2 has ${String(frame.scores.playerTwo)} before the handicap.`;
+  const label = `${positionLabel}${
+    candidateGroups.length === 0
+      ? ""
+      : ` Engine candidate markers are shown, with line ${String(selectedRank)} selected.`
+  }`;
 
   return (
     <div role="img" aria-label={label}>
@@ -31,6 +43,11 @@ export function ReplayBoard({
           <>
             <RunBands runs={frame.runs.runs} />
             <RunMarks marks={marks} />
+            <EngineCandidateMarks
+              groups={candidateGroups}
+              selectedRank={selectedRank}
+              rootPlayer={rootPlayer}
+            />
           </>
         }
       >

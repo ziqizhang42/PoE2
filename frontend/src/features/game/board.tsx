@@ -15,10 +15,10 @@ import {
 } from "../../board/board-model.ts";
 import { Counter } from "../../board/counter.tsx";
 import { RunBands, RunMarks } from "../../board/run-bands.tsx";
+import { useBoardFocus } from "../../board/use-board-focus.ts";
 import { useBoardMarks } from "../board-marks/board-marks-context.ts";
 import { marksFor } from "../board-marks/board-marks.ts";
 import type { MoveGate } from "./game-state.ts";
-import { useBoardFocus } from "./use-board-focus.ts";
 
 type BoardProps = {
   game: GameSnapshot;
@@ -129,12 +129,11 @@ export function Board({ game, seat, gate, pendingSquare, onPlay }: BoardProps) {
                   {isPending ? (
                     <span
                       aria-hidden="true"
-                      className={`num relative z-3 flex aspect-square w-[66%] items-center justify-center rounded-full border-2 border-dashed text-[clamp(9px,1.7vw,13px)] leading-none font-semibold ${
-                        seat === 1 ? "border-pen-1 text-pen-1-text" : "border-pen-2 text-pen-2-text"
+                      data-player-color={seat}
+                      className={`relative z-3 block aspect-square w-[66%] rounded-full border-2 border-dashed ${
+                        seat === 1 ? "border-pen-1" : "border-pen-2"
                       }`}
-                    >
-                      {seat}
-                    </span>
+                    />
                   ) : null}
                   {piece === null && !isPending && gain !== undefined ? (
                     <span

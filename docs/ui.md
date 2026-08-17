@@ -1,83 +1,81 @@
 # Frontend
 
-The frontend is a React single-page application. This document records the boundaries that are easy to violate; component behavior belongs in the code and tests.
+The frontend is a React single-page application. This document records cross-cutting boundaries and correctness rules; component behavior belongs in the code and tests.
 
-## Entry points
+## Architecture
 
-- [`main.tsx`](../frontend/src/main.tsx) boots the browser application.
-- [`app/app.tsx`](../frontend/src/app/app.tsx) owns the route tree.
-- [`app/providers.tsx`](../frontend/src/app/providers.tsx) installs application providers.
-- [`runtime/create-runtime.ts`](../frontend/src/runtime/create-runtime.ts) constructs the replaceable HTTP, WebSocket, clock, motion, and query services.
-
-Keep module initialization free of browser side effects. Tests create a runtime with fakes and pass it through the same providers used in production.
-
-## Routes
-
-| Route               | Access    | Purpose                                              |
-| ------------------- | --------- | ---------------------------------------------------- |
-| `/`                 | Public    | Landing page and game demonstration                  |
-| `/signin`           | Public    | Registration and sign-in                             |
-| `/player/:username` | Public    | Profile and finished-game history                    |
-| `/replay/:gameId`   | Public    | Finished-game replay                                 |
-| `/lobby`            | Signed in | Lobby discovery and creation                         |
-| `/game/:gameId`     | Signed in | Waiting, ready-check, active, and finished live game |
-
-`RequireSession` preserves a same-origin return path while redirecting to sign in. Never accept a protocol-relative or external return URL. Deliberate sign-out is tracked separately from session expiry so an expired session can return to the route the player was using.
-
-## State ownership
+[`app/app.tsx`](../frontend/src/app/app.tsx) owns routing, [`app/providers.tsx`](../frontend/src/app/providers.tsx) installs application providers, and [`runtime/create-runtime.ts`](../frontend/src/runtime/create-runtime.ts) constructs replaceable browser services. Keep module initialization free of browser side effects so tests can inject fakes through the production provider tree.
 
 | Data | Owner | Rule |
 | --- | --- | --- |
-| Session | TanStack Query in `auth/` | The session endpoint alone decides whether the browser is signed in. |
-| Player directory, public profiles, and archives | TanStack Query in `players/` and `games/` | Cache keys contain only resource identity and pagination inputs. |
-| Presence, activity, lobby, and open games | Zustand store in `live/` | Store complete server replacements without re-running game rules. |
-| View-only board annotations | `@poe2/rules` selectors | Derive from the current snapshot; do not persist them as authority. |
-| UI preferences and transient controls | Component or provider state | Keep these out of server-backed stores. |
+| Session and HTTP resources | TanStack Query | The server response is authoritative; query keys contain resource identity, not viewer state unless the response is viewer-specific. |
+| Live snapshots | Zustand in `live/` | Store complete server replacements without re-running game rules. |
+| Board annotations | `@poe2/rules` selectors | Derive them from the current snapshot. |
+| Analysis line | `features/analysis/` state and URL | Store legal move history and derive the position through `@poe2/rules`. |
+| Replay engine results | `features/replay/use-game-analysis.ts` | Index completed results by ply and retain them across cancellation or failure. |
+| UI preferences | Component or provider state | Keep them out of server-backed stores. |
 
-Do not optimistically mutate authoritative game state. A successful command ack means the transaction committed; the following snapshot is the state to render. If a connection is lost before an ack, the result is unknown until reconnect replays server state.
+Do not optimistically mutate authoritative game state. A command acknowledgement means its transaction committed; render the following snapshot. If the connection is lost before acknowledgement, the result remains unknown until synchronization.
 
-Public profile, history, and replay responses are viewer-independent. Do not put the current session in their query keys. The directory is authenticated but its contents are still viewer-independent, so it also has one shared key. Finishing a game invalidates player queries because a rated result can change rating data and every ranked player's percentile; `players.changed` invalidates the directory specifically after registration or rated results.
+## Routes
+
+| Route               | Access    | Purpose                  |
+| ------------------- | --------- | ------------------------ |
+| `/`                 | Public    | Landing page             |
+| `/signin`           | Public    | Registration and sign-in |
+| `/analysis`         | Public    | Local analysis board     |
+| `/player/:username` | Public    | Profile and game history |
+| `/replay/:gameId`   | Public    | Finished-game replay     |
+| `/lobby`            | Signed in | Lobby                    |
+| `/game/:gameId`     | Signed in | Live game                |
+
+Authentication redirects may preserve only a same-origin return path. Track deliberate sign-out separately from session expiry.
 
 ## Live connection
 
-[`live/client.ts`](../frontend/src/live/client.ts) owns one socket and [`live/store.ts`](../frontend/src/live/store.ts) contains its snapshots. The connection is usable only after the exact-version `session.ready` handshake and the final `session.synced` frame. An opening replay replaces old socket state, including `players.status`; absence before `session.synced` is not evidence that a game or player status disappeared. A server frame outside the shared schema closes the connection permanently for that page load and asks for a reload rather than retrying an incompatible build.
+[`live/client.ts`](../frontend/src/live/client.ts) owns one socket and [`live/store.ts`](../frontend/src/live/store.ts) owns its snapshots. Live state is usable only after the exact-version `session.ready` handshake and final `session.synced` frame. An opening replay replaces retained socket state; absence before synchronization is not evidence that data disappeared.
 
-The session user ID and live-store user ID must match before a screen renders live state. This prevents snapshots retained during a user switch from leaking into the next session. A policy close or refused upgrade causes a session recheck; the WebSocket client does not independently sign the user out.
+The session user ID and live-store user ID must match before rendering live state. Invalid protocol frames permanently close the connection for that page load. Policy closes and refused upgrades trigger a session recheck rather than signing the user out locally.
 
-Commands carry request IDs and settle on `command.accepted`, `command.rejected`, timeout, or connection loss. UI code should use the shared command runner so double submission and failure copy remain consistent.
-
-Ready checks are watched from the application shell, not only the game route, so the earliest unconfirmed deadline is visible anywhere in the signed-in app. Use the snapshot receipt time stored by the live client when displaying a deadline; revealing a queued check later must not restart its countdown.
+Use the shared command runner for request IDs, acknowledgements, timeouts, and connection loss. Ready checks belong in the application shell so deadlines remain visible away from the game route.
 
 See [the protocol guide](./protocol.md) for message ordering and authority.
 
-## Boards, clocks, and replays
+## Boards and analysis
 
-`frontend/src/board/` contains shared presentation and deterministic board derivations. It must not depend on player routing or live-game commands; screens provide linked names or actions as nodes. `features/game/` adds interaction to authoritative live snapshots. `features/replay/` and the landing demonstration rebuild positions locally from canonical move records with [`board/replay-script.ts`](../frontend/src/board/replay-script.ts).
+`frontend/src/board/` contains shared board presentation and deterministic derivations. It must not depend on player routing or live-game commands. Live games render authoritative snapshots; replays and analysis rebuild positions locally from canonical moves with `@poe2/rules`.
 
-During a waiting game, `players.playerOne` is the owner record even when `creatorSeat` says that owner will play second. Map the physical seat through `creatorSeat` until a second player joins.
+Treat `/analysis?moves=...` as untrusted input: validate every coordinate by replaying the complete history. Analysis has one linear continuation; playing from an earlier ply replaces the abandoned future rather than creating a variation tree.
 
-PostgreSQL decides elapsed time and timeout. The browser stores when each clock snapshot arrived and subtracts monotonic elapsed time only for display. It must never finish a game locally or reset the clock anchor when a screen mounts. Finished replays use the persisted final clock balances, including zero-move outcomes.
+Engine access is isolated behind [`browser-engine-client.ts`](../frontend/src/features/analysis/browser-engine-client.ts). WASM search runs in one module Worker so the main thread remains responsive and the engine transposition table survives completed searches. Cancel synchronous work by terminating the Worker, and reject stale messages with request IDs.
+
+Engine evaluations are normalized to Player 1. Preserve the engine's candidate order rather than sorting the numeric values for the side to move, and treat the first line's equivalent placements as the same ranked choice. A replay's full-board position uses its exact final margin instead of starting a search with no legal move.
+
+Completed results use a bounded, tab-local cache keyed by move history and candidate count. A longer time budget must still search, and a lower-node result must not replace a stronger cached result. Streamed depths may update the active readout, but only a finished search becomes a completed replay timeline point.
+
+The frontend installs `@poe2/engine-wasm` from the pinned GitHub Release in `frontend/package.json`. This is a build dependency: Vite emits the Worker and WASM asset for browsers to download from the application origin. Upgrade the release URL and lockfile together, and serve `.wasm` as `application/wasm` in production.
+
+## Clocks
+
+PostgreSQL decides elapsed time and timeout. The browser subtracts monotonic time from the latest snapshot only for display; it must never finish a game locally or reset the clock anchor when a screen mounts. Finished replays use persisted final balances.
 
 ## UI and accessibility
 
-Global tokens and responsive layout live in [`index.css`](../frontend/src/index.css); reusable controls live in `ui/`. Feature-specific composition stays with its feature. Prefer an existing token or primitive before adding a one-off style.
+Global tokens and responsive layout live in [`index.css`](../frontend/src/index.css); reusable controls live in `ui/`. Prefer existing tokens and primitives, and make selected controls distinguishable without relying on a subtle shadow or color alone.
 
 Interactive behavior must remain usable without a pointer:
 
-- use native buttons, links, inputs, and ranges where their semantics fit;
-- keep one board cell in the tab order and move focus with arrow keys;
-- expose unavailable board cells with `aria-disabled` rather than removing focus from the board;
-- keep replay boards read-only and label the playback range;
-- trap focus in modals, restore it on close, and support Escape and backdrop dismissal where the action is safe;
-- do not communicate turn, result, or connection state through color alone; and
-- honor reduced-motion preferences in animation and clock refresh behavior.
+- use native controls where their semantics fit;
+- keep one interactive board cell in the tab order and support spatial keyboard movement;
+- expose unavailable cells with `aria-disabled`;
+- label read-only boards and playback controls;
+- manage modal focus and safe dismissal; and
+- honor reduced-motion preferences.
 
-Theme selection is owned by `theme/`. The inline bootstrap in [`index.html`](../frontend/index.html) applies the stored or system theme before React paints; keep it behaviorally aligned with the provider when changing theme storage.
-
-The lobby keeps the signed-in **You** card and places the complete **Players** directory beneath it. Its native-radio Online/Overall control defaults to Online. Online filters the HTTP order by socket presence; Overall renders every row and does not add a separate presence marker. Each row links the canonical username, colors that link from `colorPercentile`, and prints the numeric rating. The list has no ranks, pagination, fixed-height scroller, or special current-player row, and owns explicit pending, empty, failure, and retry states.
+Theme bootstrap in [`index.html`](../frontend/index.html) must remain behaviorally aligned with the React theme provider.
 
 ## Tests
 
-Tests are colocated with source. [`test/render.tsx`](../frontend/src/test/render.tsx) renders the real route and provider tree, while [`test/fakes.ts`](../frontend/src/test/fakes.ts) supplies injected clients, clocks, motion preferences, and protocol-valid fixtures. Generate board facts through `@poe2/rules` where possible instead of duplicating rule logic in a fixture.
+Tests are colocated with source. [`test/render.tsx`](../frontend/src/test/render.tsx) renders the real route and provider tree, while [`test/fakes.ts`](../frontend/src/test/fakes.ts) supplies injected services and protocol-valid fixtures. Generate game facts through `@poe2/rules` instead of duplicating rule logic.
 
-JSDOM does not verify layout, native range keyboard behavior, focus-ring appearance, or actual animation timing. Check those behaviors in a browser when changing shared controls or responsive board layout. The normal commands are in [the developer guide](./dev.md#quality-and-tests).
+JSDOM does not verify layout, native range behavior, focus-ring appearance, or animation timing. Check those behaviors in a browser when changing shared controls or responsive board layout. Commands are listed in [the developer guide](./dev.md#quality-and-tests).

@@ -1,10 +1,9 @@
 import type { GameSnapshot } from "@poe2/protocol";
-import { CELL_COUNT, type Player } from "@poe2/rules";
+import type { Player } from "@poe2/rules";
 
 import { ScorePanel } from "../../board/score-panel.tsx";
 import { PlayerLink } from "../../players/player-link.tsx";
 import { HINT } from "../../ui/classes.ts";
-import { isDecidedOnPoints } from "../outcome.ts";
 import { formatClock, formatTimeControl } from "../time-control.ts";
 import { playersBySeat } from "./game-state.ts";
 import { useGameClock } from "./use-game-clock.ts";
@@ -38,21 +37,12 @@ function ScoreReadoutForGame({ game, seat, receivedAtMs = null }: ScoreReadoutPr
         players.playerTwo === null ? null : <PlayerLink username={players.playerTwo.username} />
       }
       viewerSeat={seat}
-      finished={game.status === "finished" && isDecidedOnPoints(game.outcome)}
       running={clock.running}
       // Untimed games still have a side to move.
       thinking={game.status === "active" ? game.sideToMove : null}
       {...(timed
         ? { clockOne: formatClock(clock.playerOne), clockTwo: formatClock(clock.playerTwo) }
         : {})}
-      detail={
-        game.status === "finished" ? null : (
-          <>
-            after move <span className="num">{game.moves.length}</span> of{" "}
-            <span className="num">{CELL_COUNT}</span>
-          </>
-        )
-      }
     >
       {timed ? <p className={HINT}>{formatTimeControl(game.timeControl)}</p> : null}
       {/* Keep ticking balances out of the live region. */}

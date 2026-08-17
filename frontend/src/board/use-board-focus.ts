@@ -2,7 +2,7 @@ import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent
 
 import { BOARD_SIZE, formatSquare, parseSquare, type Square } from "@poe2/rules";
 
-import { sameSquare } from "../../board/board-model.ts";
+import { sameSquare } from "./board-model.ts";
 
 const STEPS: Record<string, { readonly row: number; readonly col: number }> = {
   ArrowUp: { row: 1, col: 0 },
@@ -39,7 +39,7 @@ export interface BoardFocus {
   readonly onFocus: (event: { readonly target: EventTarget | null }) => void;
 }
 
-/** Roving tabindex that never moves focus in response to a snapshot render. */
+/** Roving tabindex that never moves focus in response to a board render. */
 export function useBoardFocus(initial: Square): BoardFocus {
   const [anchor, setAnchor] = useState<Square>(initial);
   const grid = useRef<HTMLElement | null>(null);

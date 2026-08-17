@@ -1,11 +1,13 @@
 /** Keyboard-operable labeled switch whose state is exposed through `aria-checked`. */
 export function Switch({
   label,
+  accessibleLabel,
   checked,
   disabled = false,
   onChange,
 }: {
   readonly label: string;
+  readonly accessibleLabel?: string;
   readonly checked: boolean;
   readonly disabled?: boolean;
   onChange: (checked: boolean) => void;
@@ -15,6 +17,7 @@ export function Switch({
       type="button"
       role="switch"
       aria-checked={checked}
+      {...(accessibleLabel === undefined ? {} : { "aria-label": accessibleLabel })}
       disabled={disabled}
       onClick={() => {
         onChange(!checked);

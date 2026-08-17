@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ANALYSIS_TITLE,
   GAME_TITLE,
   HOME_TITLE,
   LOBBY_TITLE,
@@ -8,12 +9,20 @@ import {
   SITE_NAME,
   titleFor,
 } from "./document-title.ts";
-import { gamePath, GAME_ROUTE, HOME_PATH, LOBBY_PATH, SIGN_IN_PATH } from "./routes.ts";
+import {
+  ANALYSIS_PATH,
+  gamePath,
+  GAME_ROUTE,
+  HOME_PATH,
+  LOBBY_PATH,
+  SIGN_IN_PATH,
+} from "./routes.ts";
 
 describe("titleFor", () => {
   it("names each screen the router has", () => {
     expect(titleFor(HOME_PATH)).toBe(HOME_TITLE);
     expect(titleFor(SIGN_IN_PATH)).toBe(SIGN_IN_TITLE);
+    expect(titleFor(ANALYSIS_PATH)).toBe(ANALYSIS_TITLE);
     expect(titleFor(LOBBY_PATH)).toBe(LOBBY_TITLE);
     expect(titleFor(GAME_ROUTE)).toBe(GAME_TITLE);
   });
@@ -30,13 +39,20 @@ describe("titleFor", () => {
   });
 
   it("names the site in every title, so a tab is identifiable either way round", () => {
-    for (const path of [HOME_PATH, SIGN_IN_PATH, LOBBY_PATH, gamePath("abc"), "/nonsense"]) {
+    for (const path of [
+      HOME_PATH,
+      SIGN_IN_PATH,
+      ANALYSIS_PATH,
+      LOBBY_PATH,
+      gamePath("abc"),
+      "/nonsense",
+    ]) {
       expect(titleFor(path)).toContain(SITE_NAME);
     }
   });
 
   it("never carries a username", () => {
-    for (const title of [HOME_TITLE, SIGN_IN_TITLE, LOBBY_TITLE, GAME_TITLE]) {
+    for (const title of [HOME_TITLE, SIGN_IN_TITLE, ANALYSIS_TITLE, LOBBY_TITLE, GAME_TITLE]) {
       expect(title).not.toMatch(/Player_One|Player_Two/);
       expect(title).toMatch(/^[\w\s—-]+$/u);
     }

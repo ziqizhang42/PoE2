@@ -4,6 +4,11 @@ export const importLobbyPage = () => import("../features/lobby/lobby-page.tsx");
 export const importGamePage = () => import("../features/game/game-page.tsx");
 export const importReplayPage = () => import("../features/replay/replay-page.tsx");
 export const importPlayerPage = () => import("../features/player/player-page.tsx");
+export const importAnalysisPage = () => import("../features/analysis/analysis-page.tsx");
+
+export const AnalysisPage = lazy(async () => ({
+  default: (await importAnalysisPage()).AnalysisPage,
+}));
 
 export const LobbyPage = lazy(async () => ({
   default: (await importLobbyPage()).LobbyPage,

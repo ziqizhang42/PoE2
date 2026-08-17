@@ -323,7 +323,7 @@ describe("GamePage", () => {
       await openGame(runtime);
 
       expect(screen.getByText("You won by 34½")).toBeInTheDocument();
-      expect(screen.getByText("+34½")).toBeInTheDocument();
+      expect(screen.queryByText("+34½")).not.toBeInTheDocument();
       expect(screen.getByText("208")).toBeInTheDocument();
       expect(screen.getByText("173½")).toBeInTheDocument();
       expect(screen.getByText("168 + 5½")).toBeInTheDocument();
@@ -331,12 +331,12 @@ describe("GamePage", () => {
       expect(cell("a1")).toHaveAttribute("aria-disabled", "true");
     });
 
-    it("does not describe a resignation as a full board", async () => {
+    it("keeps outcome prose out of the player score panel", async () => {
       holding(runtime, playedGame(MIDGAME, { resignedBy: 1 }));
       await openGame(runtime);
 
       const readout = within(screen.getByRole("region", { name: "Score" }));
-      expect(readout.getByText(/ahead$/u)).toBeInTheDocument();
+      expect(readout.queryByText(/ahead/u)).not.toBeInTheDocument();
       expect(readout.queryByText(/board full/u)).not.toBeInTheDocument();
       expect(screen.getByRole("img", { name: /Who leads/u })).not.toHaveAccessibleName(
         /finished ahead|board full/u,
@@ -375,13 +375,13 @@ describe("GamePage", () => {
       expect(strip).toHaveAccessibleName(/after move 4/);
     });
 
-    it("keeps the headline margin the snapshot's own, not the strip's", async () => {
+    it("leaves margin narration to the lead strip", async () => {
       const game = finishedGame();
       holding(runtime, game);
       await openGame(runtime);
 
       const readout = within(screen.getByRole("region", { name: "Score" }));
-      expect(readout.getByText("+34½")).toBeInTheDocument();
+      expect(readout.queryByText("+34½")).not.toBeInTheDocument();
       expect(screen.getByRole("img", { name: /Who leads/ })).toHaveAccessibleName(/34½/);
     });
 
@@ -579,9 +579,11 @@ describe("GamePage", () => {
 
       await user.click(cell("d5"));
 
-      expect(
-        await screen.findByRole("gridcell", { name: "d5, your move is being sent" }),
-      ).toBeInTheDocument();
+      const pending = await screen.findByRole("gridcell", {
+        name: "d5, your move is being sent",
+      });
+      expect(pending).toBeInTheDocument();
+      expect(pending).toHaveTextContent("");
       expect(screen.queryByRole("gridcell", { name: /^d5, player/ })).not.toBeInTheDocument();
       expect(screen.getAllByRole("gridcell", { name: /, player \d, / })).toHaveLength(4);
     });
@@ -675,7 +677,7 @@ describe("GamePage", () => {
 
       expect(marker?.className).toContain("border-pen-2");
       expect(marker?.className).not.toContain("border-pen-1");
-      expect(marker).toHaveTextContent("2");
+      expect(marker).toHaveTextContent("");
     });
 
     it("sends its move with the snapshot's revision like Player 1 does", async () => {

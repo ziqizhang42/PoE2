@@ -4,8 +4,9 @@ import { AuthPage } from "../features/auth/auth-page.tsx";
 import { LandingPage } from "../features/landing/landing-page.tsx";
 import { AppShell } from "../shell/app-shell.tsx";
 import { RequireSession } from "../shell/require-session.tsx";
-import { GamePage, LobbyPage, PlayerPage, ReplayPage } from "./lazy-routes.ts";
+import { AnalysisPage, GamePage, LobbyPage, PlayerPage, ReplayPage } from "./lazy-routes.ts";
 import {
+  ANALYSIS_PATH,
   GAME_ROUTE,
   HOME_PATH,
   LOBBY_PATH,
@@ -14,13 +15,14 @@ import {
   SIGN_IN_PATH,
 } from "./routes.ts";
 
-/** Keep the landing and sign-in routes eager; defer authenticated and archive screens. */
+/** Keep the landing and sign-in routes eager; defer the larger application screens. */
 export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
         <Route path={HOME_PATH} element={<LandingPage />} />
         <Route path={SIGN_IN_PATH} element={<AuthPage />} />
+        <Route path={ANALYSIS_PATH} element={<AnalysisPage />} />
         <Route path={PLAYER_ROUTE} element={<PlayerPage />} />
         <Route path={REPLAY_ROUTE} element={<ReplayPage />} />
         <Route element={<RequireSession />}>

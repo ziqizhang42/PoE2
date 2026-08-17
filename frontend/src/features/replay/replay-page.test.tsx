@@ -17,6 +17,8 @@ import {
   type TestRuntime,
 } from "../../test/fakes.ts";
 import { renderApp } from "../../test/render.tsx";
+import { browserEngineClient } from "../analysis/browser-engine-client.ts";
+import type { EngineWorkerCommand } from "../analysis/engine-worker-protocol.ts";
 
 const FULL_GAME = allSquares().map(formatSquare);
 const MIDGAME = ["d4", "a1", "e4", "a2", "f4"];
@@ -111,6 +113,17 @@ describe("replay screen", () => {
     expect(runtime.clock.pending()).toHaveLength(0);
   });
 
+  it("allows continuous analysis to be armed on the finished position", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(FULL_GAME));
+
+    await openReplay();
+    const engine = screen.getByRole("switch", { name: "Engine" });
+
+    expect(engine).toBeEnabled();
+    await userEvent.click(engine);
+    expect(engine).toBeChecked();
+  });
+
   it("says whether the game counted", async () => {
     runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(FULL_GAME, { rated: true }));
 
@@ -131,6 +144,17 @@ describe("replay screen", () => {
     expect(range.max).toBe(String(MIDGAME.length));
     expect(range.step).toBe("1");
     expect(range).toHaveAccessibleName("Position after ply");
+  });
+
+  it("walks replay positions with page-level Left and Right Arrow shortcuts", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+
+    await openReplay();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    expect(scrubber()).toHaveValue(String(MIDGAME.length - 1));
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    expect(scrubber()).toHaveValue(String(MIDGAME.length));
   });
 
   it("takes focus, so the strip it drives shows the focus", async () => {
@@ -167,8 +191,9 @@ describe("replay screen", () => {
     const readout = screen.getByRole("region", { name: "Score" });
 
     await waitFor(() => {
-      expect(readout).toHaveTextContent("ply 0 of 5");
+      expect(scrubber()).toHaveValue("0");
     });
+    expect(readout).not.toHaveTextContent(/ply 0 of 5|ahead/u);
 
     const playerOne = within(readout).getByRole("link", { name: USER_ONE.username }).closest("div");
     expect(playerOne).not.toBeNull();
@@ -176,7 +201,7 @@ describe("replay screen", () => {
     expect(within(playerOne as HTMLElement).getByText("no handicap")).toBeInTheDocument();
 
     expect(within(readout).getByText("0 + 5½")).toBeInTheDocument();
-    expect(within(readout).getAllByText("5½")).toHaveLength(2);
+    expect(within(readout).getAllByText("5½")).toHaveLength(1);
   });
 
   it("selects initial, post-move, and final authoritative clock records by ply", async () => {
@@ -276,13 +301,97 @@ describe("replay screen", () => {
     runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
 
     await openReplay();
-    expect(screen.getByText("f4")).toBeInTheDocument();
+    const moves = screen.getByRole("region", { name: /Moves/u });
+    expect(within(moves).getByText("f4")).toBeInTheDocument();
 
     fireEvent.change(scrubber(), { target: { value: "0" } });
 
     await waitFor(() => {
-      expect(screen.queryByText("f4")).not.toBeInTheDocument();
+      expect(within(moves).queryByText("f4")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps position and whole-game analysis inside replay", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+
+    await openReplay();
+    const engineCard = screen.getByRole("region", { name: "Engine" });
+    expect(within(engineCard).getByRole("switch", { name: "Engine" })).toBeEnabled();
+    expect(within(engineCard).getByRole("button", { name: "Analyze game" })).toBeEnabled();
+    expect(engineCard).not.toHaveTextContent(/not connected/u);
+    expect(screen.queryByRole("heading", { name: "Position analysis" })).not.toBeInTheDocument();
+    const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
+    expect(within(timeline).getAllByRole("button")).toHaveLength(2);
+    expect(within(timeline).queryByRole("switch", { name: "Engine" })).not.toBeInTheDocument();
+    expect(
+      within(timeline).queryByRole("button", { name: "Analyze game" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the complete board-score history visible while scrubbing backward", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+
+    await openReplay();
+    const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
+    const scoreGraph = within(timeline).getByRole("img");
+    expect(timeline.querySelectorAll(".lead-bar")).toHaveLength(MIDGAME.length + 1);
+    expect(scoreGraph.children).toHaveLength(MIDGAME.length + 2);
+
+    fireEvent.change(scrubber(), { target: { value: "0" } });
+
+    await waitFor(() => {
+      expect(scrubber()).toHaveValue("0");
+    });
+    expect(timeline.querySelectorAll(".lead-bar")).toHaveLength(MIDGAME.length + 1);
+    expect(scoreGraph.children).toHaveLength(MIDGAME.length + 2);
+  });
+
+  it("switches the existing scrubber from score lead to engine evaluation", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+
+    await openReplay();
+    await userEvent.click(screen.getByRole("button", { name: "Engine evaluation" }));
+
+    expect(
+      screen.getByRole("img", { name: /Engine evaluation after each move/u }),
+    ).toHaveAccessibleName(/0 of 6 positions analyzed/u);
+    expect(scrubber()).toHaveAttribute(
+      "aria-valuetext",
+      expect.stringContaining("engine evaluation not available") as never,
+    );
+    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Engine settings" }));
+    const candidates = screen.getByRole("combobox", { name: "Candidate lines" });
+    expect(within(candidates).getAllByRole("option")).toHaveLength(5);
+    await userEvent.selectOptions(candidates, "3");
+    expect(candidates).toHaveValue("3");
+  });
+
+  it("keeps continuous analysis running as the selected replay position changes", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+    const restoreWorker = installWorkerProbe();
+
+    try {
+      await openReplay();
+      await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
+
+      await waitFor(() => {
+        expect(WorkerProbe.instances).toHaveLength(1);
+      });
+      expect(WorkerProbe.instances[0]?.posted[0]?.request.moves).toEqual(MIDGAME);
+
+      fireEvent.change(scrubber(), { target: { value: "2" } });
+      await waitFor(() => {
+        expect(WorkerProbe.instances).toHaveLength(2);
+      });
+      expect(WorkerProbe.instances[0]?.terminated).toBe(true);
+      expect(WorkerProbe.instances[1]?.posted[0]?.request.moves).toEqual(MIDGAME.slice(0, 2));
+
+      await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
+      expect(WorkerProbe.instances[1]?.terminated).toBe(true);
+    } finally {
+      restoreWorker();
+    }
   });
 
   it("describes the board for a reader who cannot see it", async () => {
@@ -361,3 +470,44 @@ describe("replay screen", () => {
     }
   });
 });
+
+class WorkerProbe {
+  static readonly instances: WorkerProbe[] = [];
+
+  onmessage: Worker["onmessage"] = null;
+  onerror: Worker["onerror"] = null;
+  onmessageerror: Worker["onmessageerror"] = null;
+  readonly posted: EngineWorkerCommand[] = [];
+  terminated = false;
+
+  constructor() {
+    WorkerProbe.instances.push(this);
+  }
+
+  postMessage(command: EngineWorkerCommand): void {
+    this.posted.push(command);
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
+function installWorkerProbe(): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Worker");
+  WorkerProbe.instances.length = 0;
+  browserEngineClient.dispose();
+  Object.defineProperty(globalThis, "Worker", {
+    configurable: true,
+    value: WorkerProbe,
+  });
+
+  return () => {
+    browserEngineClient.dispose();
+    if (descriptor === undefined) {
+      Reflect.deleteProperty(globalThis, "Worker");
+    } else {
+      Object.defineProperty(globalThis, "Worker", descriptor);
+    }
+  };
+}

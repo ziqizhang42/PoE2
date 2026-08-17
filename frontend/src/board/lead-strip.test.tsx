@@ -44,6 +44,23 @@ describe("LeadStrip", () => {
     expect(screen.queryByText(label ?? "")).not.toBeInTheDocument();
   });
 
+  it("can draw a completed history while describing an earlier selected ply", () => {
+    const derived = progression(squares(["d4", "a1", "d5", "a2"]));
+    const view = render(
+      <LeadStrip
+        progression={derived}
+        currentPly={0}
+        visibleThroughPly={4}
+        axisFinalPly={4}
+        boardFull={false}
+      />,
+    );
+
+    expect(view.container.querySelectorAll(".lead-bar")).toHaveLength(5);
+    expect(screen.getByRole("img").children).toHaveLength(6);
+    expect(screen.getByRole("img")).toHaveAccessibleName(/No moves played yet/u);
+  });
+
   it("says who leads and by how much in words", () => {
     const derived = progression([]);
     render(<LeadStrip progression={derived} currentPly={0} boardFull={false} />);

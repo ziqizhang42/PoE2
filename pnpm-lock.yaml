@@ -69,6 +69,9 @@ importers:
 
   frontend:
     dependencies:
+      '@poe2/engine-wasm':
+        specifier: https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz
+        version: https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz
       '@poe2/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
@@ -980,6 +983,10 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+
+  '@poe2/engine-wasm@https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz':
+    resolution: {integrity: sha512-ie1nwb6PUVqMBfTE41p13OwAbIkvNVlxmaaIzoT6UmgA0hIZrPRQvnJwNSrPjgdn1aXUky2RXDSXxfXbShWstA==, tarball: https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz}
+    version: 0.1.0
 
   '@rolldown/binding-android-arm64@1.2.1':
     resolution: {integrity: sha512-02hOeOSryYxVrOIphmLAsqnCJWxwlzFk+pEt/N/i6OgT3lShHO7xGCU5cpgchRDHboAEbSjzgGh+O/u1GswQmA==}
@@ -2882,6 +2889,8 @@ snapshots:
     optional: true
 
   '@pinojs/redact@0.4.0': {}
+
+  '@poe2/engine-wasm@https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz': {}
 
   '@rolldown/binding-android-arm64@1.2.1':
     optional: true

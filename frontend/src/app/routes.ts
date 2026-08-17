@@ -1,5 +1,6 @@
 export const HOME_PATH = "/";
 export const SIGN_IN_PATH = "/signin";
+export const ANALYSIS_PATH = "/analysis";
 export const LOBBY_PATH = "/lobby";
 export const GAME_ROUTE = "/game/:gameId";
 export const REPLAY_ROUTE = "/replay/:gameId";
