@@ -207,3 +207,36 @@ describe("the landing page's demonstration", () => {
     });
   });
 });
+
+describe("the landing page's rules", () => {
+  it("opens the rules for a signed-out visitor", async () => {
+    const user = userEvent.setup();
+    renderApp(visitor(), "/");
+    await screen.findByRole("link", { name: "Sign in to play" });
+
+    await user.click(screen.getByRole("button", { name: "Read the rules" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Game rules" });
+    expect(dialog).toHaveClass("max-w-5xl");
+    expect(dialog).not.toHaveClass("max-w-sm");
+    expect(within(dialog).getByText("Board and turns")).toBeInTheDocument();
+    expect(within(dialog).getByText("Scoring")).toBeInTheDocument();
+    expect(within(dialog).getByText("Winning")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Game rules" })).not.toBeInTheDocument();
+  });
+
+  it("opens the same rules for a signed-in player", async () => {
+    const user = userEvent.setup();
+    const runtime = createTestRuntime({
+      authClient: createFakeAuthClient({ fetchSession: async () => USER_ONE }),
+    });
+    renderApp(runtime, "/");
+    await screen.findByRole("link", { name: "Enter the lobby" });
+
+    await user.click(screen.getByRole("button", { name: "Read the rules" }));
+
+    expect(screen.getByRole("dialog", { name: "Game rules" })).toBeInTheDocument();
+  });
+});

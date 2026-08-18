@@ -41,15 +41,16 @@ export function replayAnalysisCardControls({
     settingsDisabled: busy,
     settingsOpen,
     settingsNote: "Whole-game analysis uses one line and 1 second per position.",
+    toggle: (
+      <Switch
+        accessibleLabel="Engine"
+        checked={continuousPositionAnalysis}
+        disabled={unavailable || gameBusy}
+        onChange={onTogglePositionAnalysis}
+      />
+    ),
     actions: (
       <div className="flex flex-wrap items-center gap-2">
-        <Switch
-          label={continuousPositionAnalysis ? "On" : "Off"}
-          accessibleLabel="Engine"
-          checked={continuousPositionAnalysis}
-          disabled={unavailable || gameBusy}
-          onChange={onTogglePositionAnalysis}
-        />
         <Button size="sm" variant="surface" disabled={unavailable || busy} onClick={onAnalyzeGame}>
           Analyze game
         </Button>

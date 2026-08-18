@@ -214,7 +214,7 @@ export function LobbyPage() {
         {newGameOpen ? (
           <Modal
             labelledBy="new-game-title"
-            panelClassName="max-w-xl"
+            width="medium"
             {...(busy
               ? {}
               : {

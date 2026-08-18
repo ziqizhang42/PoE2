@@ -9,13 +9,14 @@ export interface EngineAnalysisCardControls {
   readonly settingsDisabled: boolean;
   readonly settingsOpen: boolean;
   readonly settingsNote?: ReactNode;
-  readonly actions: ReactNode;
+  readonly toggle: ReactNode;
+  readonly actions?: ReactNode;
   readonly status?: ReactNode;
   readonly onSettingsChange: (settings: PositionAnalysisSettings) => void;
   readonly onSettingsOpenChange: (open: boolean) => void;
 }
 
-/** Shared Engine card, including its top-right actions and settings. */
+/** Shared Engine card, including its heading toggle, actions, and settings. */
 export function EngineAnalysisCard({
   titleId,
   controls,
@@ -30,10 +31,13 @@ export function EngineAnalysisCard({
   return (
     <section className={CARD} aria-labelledby={titleId}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 font-display text-sm font-semibold text-ink">
-        <h2 id={titleId}>Engine</h2>
+        <div className="flex items-center gap-2">
+          <h2 id={titleId}>Engine</h2>
+          {controls?.toggle}
+        </div>
         {controls === undefined ? null : (
           <div className="flex flex-wrap items-center justify-end gap-2 font-sans font-normal">
-            {controls.actions}
+            {controls.actions ?? null}
             <span className="hidden text-xs text-ink-3 sm:inline">
               {settingsSummary(controls.settings)}
             </span>

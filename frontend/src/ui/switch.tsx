@@ -6,7 +6,7 @@ export function Switch({
   disabled = false,
   onChange,
 }: {
-  readonly label: string;
+  readonly label?: string;
   readonly accessibleLabel?: string;
   readonly checked: boolean;
   readonly disabled?: boolean;
@@ -36,7 +36,7 @@ export function Switch({
           }`}
         />
       </span>
-      {label}
+      {label === undefined ? null : label}
     </button>
   );
 }

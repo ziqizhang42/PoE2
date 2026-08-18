@@ -177,9 +177,8 @@ export function AnalysisPage() {
             settings,
             settingsDisabled: engineBusy,
             settingsOpen,
-            actions: (
+            toggle: (
               <Switch
-                label={continuousAnalysis ? "On" : "Off"}
                 accessibleLabel="Engine"
                 checked={continuousAnalysis}
                 disabled={engine.state.status === "unavailable"}

@@ -11,13 +11,21 @@ const FOCUSABLE = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+const PANEL_WIDTH = {
+  compact: "max-w-sm",
+  medium: "max-w-xl",
+  wide: "max-w-5xl",
+} as const;
+
 export function Modal({
   labelledBy,
+  width = "compact",
   panelClassName = "",
   onDismiss,
   children,
 }: {
   readonly labelledBy: string;
+  readonly width?: keyof typeof PANEL_WIDTH;
   readonly panelClassName?: string;
   /** Omit to disable Escape and backdrop dismissal. */
   readonly onDismiss?: () => void;
@@ -54,7 +62,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={`w-full max-w-sm rounded-lg border border-card-line bg-surface p-5 shadow-lift-2 outline-none sm:p-6 ${panelClassName}`}
+        className={`w-full ${PANEL_WIDTH[width]} rounded-lg border border-card-line bg-surface p-5 shadow-lift-2 outline-none sm:p-6 ${panelClassName}`}
         onKeyDown={(event) => {
           if (event.key === "Escape" && onDismiss !== undefined) {
             event.stopPropagation();

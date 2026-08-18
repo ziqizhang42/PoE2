@@ -1,16 +1,20 @@
+import { useState } from "react";
+
 import { HOME_TITLE, useDocumentTitle } from "../../app/document-title.ts";
 import { LOBBY_PATH, SIGN_IN_PATH } from "../../app/routes.ts";
 import { useSession } from "../../auth/queries.ts";
-import { LinkButton } from "../../ui/button.tsx";
+import { Button, LinkButton } from "../../ui/button.tsx";
 import { HERO, EYEBROW, LEDE } from "../../ui/classes.ts";
 import { Demonstration } from "./demonstration.tsx";
+import { RulesDialog } from "./rules-dialog.tsx";
 
 export function LandingPage() {
   useDocumentTitle(HOME_TITLE);
   const session = useSession();
-  // Hold the action row until a restored session can choose its destination.
+  // Hold account actions until a restored session can choose their destination.
   const resolved = session.data !== undefined || session.isError;
   const signedIn = session.data !== undefined && session.data !== null;
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   return (
     <div>
@@ -41,11 +45,26 @@ export function LandingPage() {
                 <LinkButton to={`${SIGN_IN_PATH}?mode=register`}>Create an account</LinkButton>
               </>
             )}
+            <Button
+              variant="quiet"
+              onClick={() => {
+                setRulesOpen(true);
+              }}
+            >
+              Read the rules
+            </Button>
           </div>
         </div>
 
         <Demonstration />
       </section>
+      {rulesOpen ? (
+        <RulesDialog
+          onDismiss={() => {
+            setRulesOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

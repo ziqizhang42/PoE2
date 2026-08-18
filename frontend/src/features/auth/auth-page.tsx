@@ -5,7 +5,7 @@ import { SIGN_IN_TITLE, useDocumentTitle } from "../../app/document-title.ts";
 import { returnPath } from "../../app/routes.ts";
 import { useSession } from "../../auth/queries.ts";
 import { PagePending } from "../../shell/page-pending.tsx";
-import { CARD, EYEBROW, H_LG, H_XL, NOTE, STACK, TWO_UP } from "../../ui/classes.ts";
+import { EYEBROW, H_XL, NOTE } from "../../ui/classes.ts";
 import { CredentialForm } from "./credential-form.tsx";
 import type { AuthMode } from "./messages.ts";
 
@@ -30,7 +30,7 @@ export function AuthPage() {
   }
 
   return (
-    <div className={TWO_UP}>
+    <div className="py-8">
       <div>
         <p className={EYEBROW}>Account</p>
         <h1 className={H_XL}>Sign in to play</h1>
@@ -77,40 +77,6 @@ export function AuthPage() {
         {/* Remount to clear credentials and errors when changing mode. */}
         <CredentialForm key={mode} mode={mode} />
       </div>
-
-      <aside className={STACK} aria-labelledby="account-facts-title">
-        <h2 id="account-facts-title" className={EYEBROW}>
-          What an account is here
-        </h2>
-        <div className={CARD}>
-          <h3 className={H_LG}>A username and a password</h3>
-          <p className={NOTE}>
-            That is the whole record. No email address, no display name, and nothing else to fill
-            in.
-          </p>
-        </div>
-        <div className={CARD}>
-          <h3 className={H_LG}>The session is a cookie the server sets</h3>
-          <p className={NOTE}>
-            The browser never holds a token this code can read, and signing out ends the session on
-            the server rather than waiting for it to expire.
-          </p>
-        </div>
-        <div className={CARD}>
-          <h3 className={H_LG}>Attempts are rate limited</h3>
-          <p className={NOTE}>
-            Repeated sign-ins are refused for a while — both from one address and against one
-            account — so a wrong guess costs more than the next attempt.
-          </p>
-        </div>
-        <div className={CARD}>
-          <h3 className={H_LG}>There is no way to reset a password</h3>
-          <p className={NOTE}>
-            Recovery needs somewhere to send it, and there is no email address on file. A forgotten
-            password means a new account.
-          </p>
-        </div>
-      </aside>
     </div>
   );
 }

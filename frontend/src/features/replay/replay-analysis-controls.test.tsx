@@ -102,7 +102,7 @@ describe("ReplayAnalysisControls", () => {
     );
 
     expect(screen.getByRole("switch", { name: "Engine" })).toBeChecked();
-    expect(screen.getByText("On")).toBeInTheDocument();
+    expect(screen.queryByText(/^(?:On|Off)$/u)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/positions analyzed|selected position|Continuous analysis/u),
     ).toBeNull();

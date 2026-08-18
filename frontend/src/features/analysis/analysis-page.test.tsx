@@ -33,7 +33,7 @@ describe("analysis page", () => {
     const engineCard = screen.getByRole("region", { name: "Engine" });
     expect(engineCard).not.toHaveTextContent(/not connected/u);
     expect(screen.getByRole("switch", { name: "Engine" })).not.toBeChecked();
-    expect(within(engineCard).getByText("Off")).toBeInTheDocument();
+    expect(within(engineCard).queryByText(/^(?:On|Off)$/u)).not.toBeInTheDocument();
     const scorePanel = screen.getByRole("region", { name: "Score" });
     expect(scorePanel).not.toHaveTextContent(/ahead|after move/u);
     expect(within(scorePanel).getByText("Player 1")).toBeInTheDocument();

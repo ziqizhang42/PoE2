@@ -12,7 +12,7 @@ import type { AuthRequestError } from "../../auth/errors.ts";
 export type AuthMode = "login" | "register";
 
 export const USERNAME_RULE = `${USERNAME_MIN_LENGTH}–${USERNAME_MAX_LENGTH} characters: letters, numbers, and underscores.`;
-export const PASSWORD_RULE = `${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} characters. A short phrase beats a short password.`;
+export const PASSWORD_RULE = `${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} characters.`;
 
 export function validateUsername(username: string): string | null {
   return UsernameSchema.safeParse(username).success ? null : USERNAME_RULE;

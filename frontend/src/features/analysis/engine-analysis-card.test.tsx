@@ -29,9 +29,7 @@ describe("EngineAnalysisCard", () => {
           settings: DEFAULT_POSITION_ANALYSIS_SETTINGS,
           settingsDisabled: false,
           settingsOpen: false,
-          actions: (
-            <Switch label="Off" accessibleLabel="Engine" checked={false} onChange={vi.fn()} />
-          ),
+          toggle: <Switch accessibleLabel="Engine" checked={false} onChange={vi.fn()} />,
           onSettingsChange: vi.fn(),
           onSettingsOpenChange,
         }}
@@ -41,8 +39,10 @@ describe("EngineAnalysisCard", () => {
     );
 
     const card = screen.getByRole("region", { name: "Engine" });
-    expect(within(card).getByRole("switch", { name: "Engine" })).toBeInTheDocument();
-    expect(within(card).getByText("Off")).toBeInTheDocument();
+    const heading = within(card).getByRole("heading", { name: "Engine" });
+    const toggle = within(card).getByRole("switch", { name: "Engine" });
+    expect(heading.nextElementSibling).toBe(toggle);
+    expect(within(card).queryByText(/^(?:On|Off)$/u)).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Engine settings" })).toBeInTheDocument();
     expect(within(card).getByText("Engine result")).toBeInTheDocument();
 
@@ -56,9 +56,7 @@ describe("EngineAnalysisCard", () => {
           settings: DEFAULT_POSITION_ANALYSIS_SETTINGS,
           settingsDisabled: false,
           settingsOpen: true,
-          actions: (
-            <Switch label="Off" accessibleLabel="Engine" checked={false} onChange={vi.fn()} />
-          ),
+          toggle: <Switch accessibleLabel="Engine" checked={false} onChange={vi.fn()} />,
           onSettingsChange: vi.fn(),
           onSettingsOpenChange,
         }}
