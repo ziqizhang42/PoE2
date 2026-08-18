@@ -43,7 +43,7 @@ describe("AuthPage", () => {
     await user.click(submitButton("Sign in"));
 
     expect(
-      await screen.findByRole("heading", { name: "Open a seat, or take one" }),
+      await screen.findByRole("heading", { name: "Create a game or take a seat" }),
     ).toBeInTheDocument();
     expect(login).toHaveBeenCalledWith({ username: USER_ONE.username, password: PASSWORD });
     expect(window.location.pathname).toBe("/lobby");
@@ -123,7 +123,7 @@ describe("AuthPage", () => {
 
     expect(register).toHaveBeenCalledWith({ username: "New_Player", password: PASSWORD });
     expect(
-      await screen.findByRole("heading", { name: "Open a seat, or take one" }),
+      await screen.findByRole("heading", { name: "Create a game or take a seat" }),
     ).toBeInTheDocument();
   });
 

@@ -114,11 +114,7 @@ export function AnalysisPage() {
             selectedRank={visibleSelectedRank}
             onPlay={control.play}
           />
-          <p className={HINT}>
-            {finished
-              ? "The board is full. Undo a move to keep exploring."
-              : "Choose any empty square. Move with the arrow keys and play with Enter."}
-          </p>
+          {finished ? <p className={HINT}>The board is full. Undo a move to keep exploring.</p> : null}
 
           <div
             role="group"
@@ -166,7 +162,7 @@ export function AnalysisPage() {
           />
         </section>
 
-        <MoveHistory moves={game.moves} />
+        <ExponentLadder board={game.board} />
       </div>
 
       <div className={STACK}>
@@ -211,7 +207,7 @@ export function AnalysisPage() {
           nameTwo="Player 2"
           thinking={finished ? null : player}
         />
-        <ExponentLadder board={game.board} />
+        <MoveHistory moves={game.moves} />
         <BoardMarksControl />
       </div>
     </div>

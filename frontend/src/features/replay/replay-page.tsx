@@ -241,7 +241,7 @@ function Replay({ game }: { game: GameReplay }) {
           </div>
         </section>
 
-        <MoveHistory moves={frame.moves} {...(moveTimesMs === null ? {} : { moveTimesMs })} />
+        <ExponentLadder board={frame.board} />
       </div>
 
       <div className={STACK}>
@@ -266,7 +266,7 @@ function Replay({ game }: { game: GameReplay }) {
               })}
         />
 
-        <ExponentLadder board={frame.board} />
+        <MoveHistory moves={frame.moves} {...(moveTimesMs === null ? {} : { moveTimesMs })} />
         <BoardMarksControl />
 
         <div className="flex flex-wrap items-center gap-2">

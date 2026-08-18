@@ -45,7 +45,7 @@ describe("SessionNav", () => {
     });
 
     renderApp(runtime, "/lobby");
-    await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -64,7 +64,7 @@ describe("SessionNav", () => {
     });
 
     renderApp(runtime, "/lobby");
-    await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -86,7 +86,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-      await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
       await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -100,7 +100,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-      await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
       runtime.queryClient.setQueryData(AUTH_SESSION_KEY, null);
 
@@ -127,7 +127,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-      await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
       await user.click(screen.getByRole("button", { name: "Sign out" }));
       await user.click(await screen.findByRole("link", { name: "Sign in to play" }));
 
@@ -135,7 +135,7 @@ describe("SessionNav", () => {
       await user.type(form.getByLabelText("Username"), USER_ONE.username);
       await user.type(form.getByLabelText("Password"), "correct horse battery staple");
       await user.click(form.getByRole("button", { name: "Sign in" }));
-      await screen.findByRole("heading", { name: "Open a seat, or take one" });
+      await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
       runtime.queryClient.setQueryData(AUTH_SESSION_KEY, null);
 

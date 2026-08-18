@@ -907,7 +907,7 @@ describe("GamePage", () => {
 
       expect(runtime.live.cancelLobby).toHaveBeenCalledWith(GAME_ID);
       expect(
-        await screen.findByRole("heading", { name: "Open a seat, or take one" }),
+        await screen.findByRole("heading", { name: "Create a game or take a seat" }),
       ).toBeInTheDocument();
     });
 

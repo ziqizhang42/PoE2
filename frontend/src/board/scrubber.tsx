@@ -65,8 +65,7 @@ export function Scrubber({
         />
       </div>
 
-      <p className={`${HINT} flex flex-wrap justify-between gap-x-4`}>
-        <span>Drag, or use the arrow keys.</span>
+      <p className={HINT}>
         <span className="num">
           ply {ply} / {finalPly}
         </span>

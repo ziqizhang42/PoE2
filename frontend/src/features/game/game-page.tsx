@@ -233,7 +233,7 @@ export function GamePage() {
           )}
         </section>
 
-        <MoveHistory moves={game.moves} />
+        {showLadder ? <ExponentLadder board={game.board} /> : null}
       </div>
 
       <div className={STACK}>
@@ -241,7 +241,7 @@ export function GamePage() {
         {showScore ? (
           <ScoreReadout game={game} seat={seat} receivedAtMs={gameReceivedAtMs} />
         ) : null}
-        {showLadder ? <ExponentLadder board={game.board} /> : null}
+        <MoveHistory moves={game.moves} />
 
         {game.rated ? null : <BoardMarksControl />}
 

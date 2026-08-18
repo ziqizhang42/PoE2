@@ -26,8 +26,7 @@ export function LandingPage() {
           </h1>
           <p className={LEDE}>
             Every straight run of your pieces is worth <span className="num">2ⁿ⁻¹</span>, in four
-            directions at once, and pieces never move. Filling the board is easy. Knowing what the
-            board is worth is not.
+            directions at once, and pieces never move.
           </p>
           <div className="mt-8 flex min-h-[42px] flex-wrap items-center gap-3">
             {!resolved ? null : signedIn ? (

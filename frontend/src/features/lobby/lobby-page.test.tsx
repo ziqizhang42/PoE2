@@ -39,7 +39,7 @@ function ready(runtime: TestRuntime): void {
 
 async function openLobby(runtime: TestRuntime): Promise<void> {
   renderApp(runtime, "/lobby");
-  await screen.findByRole("heading", { name: "Open a seat, or take one" });
+  await screen.findByRole("heading", { name: "Create a game or take a seat" });
 }
 
 async function showNewGame(): Promise<void> {
@@ -212,7 +212,7 @@ describe("LobbyPage", () => {
       await waitFor(() => {
         expect(runtime.live.createLobby).toHaveBeenCalledTimes(1);
       });
-      expect(screen.getByRole("heading", { name: "Open a seat, or take one" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Create a game or take a seat" })).toBeInTheDocument();
 
       runtime.live.store.setState({ games: [waitingGame(OTHER_GAME_ID, USER_ONE)] });
 
@@ -250,7 +250,7 @@ describe("LobbyPage", () => {
         "That was too many commands at once",
       );
       runtime.live.store.setState({ games: [waitingGame(OTHER_GAME_ID, USER_ONE)] });
-      expect(screen.getByRole("heading", { name: "Open a seat, or take one" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Create a game or take a seat" })).toBeInTheDocument();
     });
 
     it("opens a lobby whose acknowledgement was lost", async () => {
@@ -313,7 +313,7 @@ describe("LobbyPage", () => {
       });
 
       expect(await screen.findByRole("dialog", { name: "Ready to play?" })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Open a seat, or take one" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Create a game or take a seat" })).toBeInTheDocument();
     });
 
     it("answers from where it opened, rather than sending the reader to the board", async () => {
@@ -330,7 +330,7 @@ describe("LobbyPage", () => {
         gameId: GAME_ID,
         readyCheckGeneration: 1,
       });
-      expect(screen.getByRole("heading", { name: "Open a seat, or take one" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Create a game or take a seat" })).toBeInTheDocument();
     });
 
     it("reveals the next check once this seat has confirmed the earlier one", async () => {
@@ -393,7 +393,7 @@ describe("LobbyPage", () => {
     await user.click(screen.getByRole("button", { name: "Join" }));
 
     expect(await screen.findByText("Someone else took that seat first.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Open a seat, or take one" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create a game or take a seat" })).toBeInTheDocument();
   });
 
   it("announces a command the server refused", async () => {

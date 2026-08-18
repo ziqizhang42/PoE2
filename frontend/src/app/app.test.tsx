@@ -94,7 +94,7 @@ describe("App routing", () => {
     renderApp(runtime, "/lobby");
 
     expect(
-      await screen.findByRole("heading", { name: "Open a seat, or take one" }),
+      await screen.findByRole("heading", { name: "Create a game or take a seat" }),
     ).toBeInTheDocument();
   });
 
@@ -140,7 +140,7 @@ describe("deferred screens", () => {
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
 
     expect(
-      await screen.findByRole("heading", { name: "Open a seat, or take one" }),
+      await screen.findByRole("heading", { name: "Create a game or take a seat" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
   });
@@ -192,7 +192,7 @@ describe("document titles", () => {
 
     renderApp(runtime, "/lobby");
 
-    await screen.findByRole("heading", { name: "Open a seat, or take one" });
+    await screen.findByRole("heading", { name: "Create a game or take a seat" });
     expect(document.title).toBe(titleFor("/lobby"));
   });
 

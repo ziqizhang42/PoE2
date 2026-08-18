@@ -173,7 +173,7 @@ export function LobbyPage() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className={EYEBROW}>Lobby</p>
-            <h1 className={H_XL}>Open a seat, or take one</h1>
+            <h1 className={H_XL}>Create a game or take a seat</h1>
             <p className={NOTE}>
               A room is one open seat. It stays up until another player takes it or you withdraw it.
             </p>
