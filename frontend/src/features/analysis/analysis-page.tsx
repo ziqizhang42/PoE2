@@ -114,7 +114,9 @@ export function AnalysisPage() {
             selectedRank={visibleSelectedRank}
             onPlay={control.play}
           />
-          {finished ? <p className={HINT}>The board is full. Undo a move to keep exploring.</p> : null}
+          {finished ? (
+            <p className={HINT}>The board is full. Undo a move to keep exploring.</p>
+          ) : null}
 
           <div
             role="group"

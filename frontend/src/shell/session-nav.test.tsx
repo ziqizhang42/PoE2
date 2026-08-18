@@ -86,7 +86,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-    await screen.findByRole("heading", { name: "Create a game or take a seat" });
+      await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
       await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -100,7 +100,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-    await screen.findByRole("heading", { name: "Create a game or take a seat" });
+      await screen.findByRole("heading", { name: "Create a game or take a seat" });
 
       runtime.queryClient.setQueryData(AUTH_SESSION_KEY, null);
 
@@ -127,7 +127,7 @@ describe("SessionNav", () => {
       });
 
       renderApp(runtime, "/lobby");
-    await screen.findByRole("heading", { name: "Create a game or take a seat" });
+      await screen.findByRole("heading", { name: "Create a game or take a seat" });
       await user.click(screen.getByRole("button", { name: "Sign out" }));
       await user.click(await screen.findByRole("link", { name: "Sign in to play" }));
 
