@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { parseSquare, type Square } from "@poe2/rules";
 
-import { engineSuccess, FakeEngineClient } from "../../test/engine.ts";
+import { engineSuccess, FakeEngineClient, TEST_ENGINE_VERSION } from "../../test/engine.ts";
 import { clearEngineAnalysisCache } from "./engine-analysis-cache.ts";
 import { useEngineAnalysis } from "./use-engine-analysis.ts";
 
@@ -71,7 +71,11 @@ describe("useEngineAnalysis", () => {
     });
     expect(result.current.state).toMatchObject({
       status: "ready",
-      report: { bestMove: square("a1"), evaluationHalfPoints: 5, engineVersion: "0.1.0" },
+      report: {
+        bestMove: square("a1"),
+        evaluationHalfPoints: 5,
+        engineVersion: TEST_ENGINE_VERSION,
+      },
     });
     expect(result.current.evaluations).toEqual([null, 5]);
   });

@@ -3,6 +3,7 @@ import { useId } from "react";
 import { Button } from "../../ui/button.tsx";
 import {
   ANALYSIS_TIME_CHOICES,
+  CANDIDATE_COUNTS,
   isCandidateCount,
   type PositionAnalysisSettings,
 } from "./analysis-settings.ts";
@@ -36,7 +37,7 @@ export function AnalysisSettingsControl({
             }}
             className="rounded-sm border border-line bg-sunken px-2.5 py-2 text-xs text-ink disabled:opacity-55"
           >
-            {[1, 2, 3, 4, 5].map((count) => (
+            {CANDIDATE_COUNTS.map((count) => (
               <option key={count} value={count}>
                 {count} {count === 1 ? "line" : "lines"}
               </option>

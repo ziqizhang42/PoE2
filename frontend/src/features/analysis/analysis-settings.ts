@@ -1,4 +1,6 @@
-export type CandidateCount = 1 | 2 | 3 | 4 | 5;
+/** Multi-PV choices supported by the installed engine contract and exposed by the UI. */
+export const CANDIDATE_COUNTS = [1, 2, 3, 4, 5] as const;
+export type CandidateCount = (typeof CANDIDATE_COUNTS)[number];
 export type AnalysisTimePreset = "fast" | "balanced" | "deep";
 
 export interface PositionAnalysisSettings {
@@ -52,5 +54,5 @@ export function analysisTimeChoice(preset: AnalysisTimePreset): AnalysisTimeChoi
 }
 
 export function isCandidateCount(value: number): value is CandidateCount {
-  return Number.isInteger(value) && value >= 1 && value <= 5;
+  return CANDIDATE_COUNTS.some((candidate) => candidate === value);
 }

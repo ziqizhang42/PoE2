@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AnalysisSuccess } from "@poe2/engine-wasm";
 import { parseSquare, type Square } from "@poe2/rules";
 
-import { engineSuccess } from "../../test/engine.ts";
+import { engineSuccess, TEST_ENGINE_API_VERSION, TEST_ENGINE_VERSION } from "../../test/engine.ts";
 import {
   encodeEngineMoves,
   engineAnalysisReport,
@@ -59,8 +59,8 @@ describe("engine analysis adapter", () => {
         { rank: 1, move: square("d4"), equivalentMoves: [square("d4"), square("e4")] },
         { rank: 2, move: square("c4") },
       ],
-      engineVersion: "0.1.0",
-      apiVersion: 1,
+      engineVersion: TEST_ENGINE_VERSION,
+      apiVersion: TEST_ENGINE_API_VERSION,
     });
   });
 

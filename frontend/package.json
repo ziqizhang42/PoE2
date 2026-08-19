@@ -13,7 +13,7 @@
     "typecheck": "tsc -b tsconfig.test.json tsconfig.node.json"
   },
   "dependencies": {
-    "@poe2/engine-wasm": "https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.1.0/poe2-engine-wasm-0.1.0.tgz",
+    "@poe2/engine-wasm": "catalog:engine",
     "@poe2/protocol": "workspace:*",
     "@poe2/rules": "workspace:*",
     "@tanstack/react-query": "5.101.4",

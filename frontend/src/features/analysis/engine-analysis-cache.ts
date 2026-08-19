@@ -84,11 +84,21 @@ function store(
   pruneExpired(now);
   const key = cacheKey(moves, settings);
   const current = cache.get(key);
+  const compatibleCurrent =
+    current?.report.engineVersion === candidate.engineVersion &&
+    current.report.apiVersion === candidate.apiVersion
+      ? current
+      : undefined;
   const report =
-    current === undefined || candidate.nodes > current.report.nodes ? candidate : current.report;
+    compatibleCurrent === undefined || candidate.nodes > compatibleCurrent.report.nodes
+      ? candidate
+      : compatibleCurrent.report;
   const next: CacheEntry = {
     report,
-    completedSearchTimeMs: Math.max(current?.completedSearchTimeMs ?? 0, completedSearchTimeMs),
+    completedSearchTimeMs: Math.max(
+      compatibleCurrent?.completedSearchTimeMs ?? 0,
+      completedSearchTimeMs,
+    ),
     lastUsedAt: now,
   };
 

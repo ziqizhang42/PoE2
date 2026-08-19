@@ -6,6 +6,10 @@ import type {
   EngineSearchHandle,
 } from "../features/analysis/browser-engine-client.ts";
 
+/** The one fixture value coupled to the currently installed package contract. */
+export const TEST_ENGINE_VERSION: AnalysisSuccess["engineVersion"] = "0.1.0";
+export const TEST_ENGINE_API_VERSION: AnalysisSuccess["apiVersion"] = 1;
+
 export interface FakeEngineSearch {
   readonly request: AnalysisRequest;
   readonly callbacks: EngineSearchCallbacks;
@@ -47,7 +51,7 @@ export function engineSuccess(
     ],
     completedDepth: options.completedDepth ?? 5,
     nodes: options.nodes ?? 12_345,
-    engineVersion: "0.1.0",
-    apiVersion: 1,
+    engineVersion: TEST_ENGINE_VERSION,
+    apiVersion: TEST_ENGINE_API_VERSION,
   };
 }

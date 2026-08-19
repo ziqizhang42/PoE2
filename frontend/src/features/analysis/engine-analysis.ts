@@ -21,7 +21,7 @@ export interface EngineAnalysisReport {
   /** Engine-ranked root alternatives. The top-level fields alias the first line. */
   readonly lines: readonly [EngineCandidateLine, ...EngineCandidateLine[]];
   readonly engineVersion: string;
-  readonly apiVersion: 1;
+  readonly apiVersion: number;
 }
 
 /** Engine-neutral UI state produced by the browser Worker boundary. */

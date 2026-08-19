@@ -53,7 +53,16 @@ Engine evaluations are normalized to Player 1. Preserve the engine's candidate o
 
 Completed results use a bounded, tab-local cache keyed by move history and candidate count. A longer time budget must still search, and a lower-node result must not replace a stronger cached result. Streamed depths may update the active readout, but only a finished search becomes a completed replay timeline point.
 
-The frontend installs `@poe2/engine-wasm` from the pinned GitHub Release in `frontend/package.json`. This is a build dependency: Vite emits the Worker and WASM asset for browsers to download from the application origin. Upgrade the release URL and lockfile together, and serve `.wasm` as `application/wasm` in production.
+The frontend installs `@poe2/engine-wasm` through the named `engine` catalog in [`pnpm-workspace.yaml`](../pnpm-workspace.yaml). The catalog value is an opaque, exact package spec: use the artifact spec published by an engine release rather than constructing a URL from its version. `frontend/package.json` must keep using `catalog:engine` so the source remains centralized.
+
+The engine is a build dependency: Vite emits the Worker and WASM asset for browsers to download from the application origin. To upgrade it:
+
+1. replace only the `catalogs.engine` package spec with the release-provided spec;
+2. run `pnpm install` to resolve the artifact and update `pnpm-lock.yaml`;
+3. inspect the installed package's version, exports, and TypeScript contract instead of assuming they match the previous release; and
+4. run the frontend typecheck, analysis tests, and production bundle.
+
+Engine and API versions shown in the UI come from each engine response; application models must not encode a particular release version. UI-supported Multi-PV values live once in `analysis-settings.ts`, and cached reports from different engine or API versions are never compared as interchangeable search results. Serve emitted `.wasm` files as `application/wasm` in production.
 
 ## Clocks
 

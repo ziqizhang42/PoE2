@@ -39,6 +39,27 @@ describe("engine analysis cache", () => {
     });
   });
 
+  it.each([
+    [
+      "engine release",
+      { engineVersion: "0.1.0", apiVersion: 1 },
+      { engineVersion: "0.2.0", apiVersion: 1 },
+    ],
+    [
+      "engine API",
+      { engineVersion: "0.2.0", apiVersion: 1 },
+      { engineVersion: "0.2.0", apiVersion: 2 },
+    ],
+  ])("does not compare or carry budgets across a different %s", (_label, before, after) => {
+    cacheEngineAnalysisResult([], DEEP, report(100_000, 9, before), 100);
+    cacheEngineAnalysisProgress([], DEEP, report(100, -3, after), 101);
+
+    expect(readCachedEngineAnalysis([], DEEP, 102)).toMatchObject({
+      report: { nodes: 100, evaluationHalfPoints: -3, ...after },
+      satisfiesRequest: false,
+    });
+  });
+
   it("forgets an untouched entry after fifteen minutes", () => {
     cacheEngineAnalysisResult([], FAST, report(10_000, 3), 100);
 
@@ -46,7 +67,14 @@ describe("engine analysis cache", () => {
   });
 });
 
-function report(nodes: number, evaluationHalfPoints: number): EngineAnalysisReport {
+function report(
+  nodes: number,
+  evaluationHalfPoints: number,
+  identity: Pick<EngineAnalysisReport, "engineVersion" | "apiVersion"> = {
+    engineVersion: "0.2.0",
+    apiVersion: 1,
+  },
+): EngineAnalysisReport {
   const move = { row: 3, col: 3 };
   return {
     bestMove: move,
@@ -63,7 +91,6 @@ function report(nodes: number, evaluationHalfPoints: number): EngineAnalysisRepo
         principalVariation: [move],
       },
     ],
-    engineVersion: "0.2.0",
-    apiVersion: 1,
+    ...identity,
   };
 }

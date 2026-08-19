@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation, useNavigate, useNavigationType } from "react-router";
 
 import type { Square } from "@poe2/rules";
 
@@ -24,12 +24,22 @@ export interface AnalysisLineControl {
   readonly reset: () => void;
 }
 
+const ANALYSIS_NAVIGATION_SOURCE = "analysisLineSource";
+
+function isInternalAnalysisNavigation(state: unknown, source: string): boolean {
+  if (typeof state !== "object" || state === null) return false;
+
+  return (state as Record<string, unknown>)[ANALYSIS_NAVIGATION_SOURCE] === source;
+}
+
 /** Owns the editable line while keeping its current position shareable in the address bar. */
 export function useAnalysisLine(): AnalysisLineControl {
   const location = useLocation();
   const navigate = useNavigate();
+  const navigationType = useNavigationType();
   const initial = useRef(readAnalysisUrl(location.search));
   const handledSearch = useRef(location.search);
+  const [navigationSource] = useState(() => crypto.randomUUID());
   const [line, setLine] = useState<AnalysisLine>(() =>
     analysisLine(initial.current.ok ? initial.current.moves : []),
   );
@@ -39,6 +49,16 @@ export function useAnalysisLine(): AnalysisLineControl {
 
   // Handle links to another analysis position while this route remains mounted.
   useEffect(() => {
+    // Router location updates may be delivered after a newer scrub has already
+    // committed. Those replacements only mirror the in-memory line into the URL;
+    // replaying one would turn an older prefix into the new end of the line.
+    if (
+      navigationType === "REPLACE" &&
+      isInternalAnalysisNavigation(location.state, navigationSource)
+    ) {
+      return;
+    }
+
     if (handledSearch.current === location.search) {
       return;
     }
@@ -47,7 +67,7 @@ export function useAnalysisLine(): AnalysisLineControl {
     const decoded = readAnalysisUrl(location.search);
     setLine(analysisLine(decoded.ok ? decoded.moves : []));
     setUrlError(decoded.ok ? null : decoded.message);
-  }, [location.search]);
+  }, [location.search, location.state, navigationSource, navigationType]);
 
   const commit = useCallback(
     (next: AnalysisLine) => {
@@ -56,9 +76,12 @@ export function useAnalysisLine(): AnalysisLineControl {
       handledSearch.current = queryStart === -1 ? "" : target.slice(queryStart);
       setLine(next);
       setUrlError(null);
-      void navigate(target, { replace: true });
+      void navigate(target, {
+        replace: true,
+        state: { [ANALYSIS_NAVIGATION_SOURCE]: navigationSource },
+      });
     },
-    [navigate],
+    [navigate, navigationSource],
   );
 
   const play = useCallback(

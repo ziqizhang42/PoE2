@@ -3,6 +3,13 @@ packages:
   - backend
   - packages/*
 
+# Keep the engine artifact as one opaque, exact package spec. For an upgrade,
+# replace this value with the spec published by that release; do not infer its
+# tag, host, or filename from the version number.
+catalogs:
+  engine:
+    "@poe2/engine-wasm": https://github.com/ziqizhang42/PoE2-engine/releases/download/v0.2.0/poe2-engine-wasm-0.2.0.tgz
+
 engineStrict: true
 storeDir: /pnpm/store
 
