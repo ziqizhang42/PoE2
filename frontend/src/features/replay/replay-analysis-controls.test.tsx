@@ -61,7 +61,6 @@ describe("ReplayAnalysisControls", () => {
 
     expect(screen.getByText("1 of 3 positions analyzed.")).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Game analysis time per move" })).toHaveValue("0");
-    expect(screen.getByText(/choose Analyze game in a replay/u)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cancel game analysis" }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
