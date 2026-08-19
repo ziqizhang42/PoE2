@@ -1,6 +1,6 @@
 import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
-import type { PositionAnalysisSettings } from "../analysis/analysis-settings.ts";
+import type { EngineSettings } from "../analysis/analysis-settings.ts";
 import type { EngineAnalysisCardControls } from "../analysis/engine-analysis-card.tsx";
 import {
   completedPositionCount,
@@ -11,9 +11,9 @@ import {
 export type ReplayAnalysisControlsOptions = {
   state: GameAnalysisState;
   continuousPositionAnalysis: boolean;
-  positionSettings: PositionAnalysisSettings;
+  settings: EngineSettings;
   settingsOpen: boolean;
-  onPositionSettingsChange: (settings: PositionAnalysisSettings) => void;
+  onSettingsSave: (settings: EngineSettings) => void;
   onSettingsOpenChange: (open: boolean) => void;
   onTogglePositionAnalysis: () => void;
   onAnalyzeGame: () => void;
@@ -23,9 +23,9 @@ export type ReplayAnalysisControlsOptions = {
 export function replayAnalysisCardControls({
   state,
   continuousPositionAnalysis,
-  positionSettings,
+  settings,
   settingsOpen,
-  onPositionSettingsChange,
+  onSettingsSave,
   onSettingsOpenChange,
   onTogglePositionAnalysis,
   onAnalyzeGame,
@@ -37,10 +37,8 @@ export function replayAnalysisCardControls({
     (state.status === "loading" || state.status === "analyzing") && state.activity.kind === "game";
 
   return {
-    settings: positionSettings,
-    settingsDisabled: busy,
+    settings,
     settingsOpen,
-    settingsNote: "Whole-game analysis uses one line and 1 second per position.",
     toggle: (
       <Switch
         accessibleLabel="Engine"
@@ -55,7 +53,7 @@ export function replayAnalysisCardControls({
           Analyze game
         </Button>
         {gameBusy ? (
-          <Button size="sm" variant="quiet" onClick={onCancel}>
+          <Button size="sm" variant="quiet" aria-label="Cancel game analysis" onClick={onCancel}>
             Cancel
           </Button>
         ) : null}
@@ -71,7 +69,7 @@ export function replayAnalysisCardControls({
           ),
         }
       : {}),
-    onSettingsChange: onPositionSettingsChange,
+    onSettingsSave,
     onSettingsOpenChange,
   };
 }

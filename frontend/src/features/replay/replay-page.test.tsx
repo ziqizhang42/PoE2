@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { GameReplay } from "@poe2/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -16,9 +16,8 @@ import {
   USER_TWO,
   type TestRuntime,
 } from "../../test/fakes.ts";
+import { engineSuccess, EngineWorkerProbe, installEngineWorkerProbe } from "../../test/engine.ts";
 import { renderApp } from "../../test/render.tsx";
-import { browserEngineClient } from "../analysis/browser-engine-client.ts";
-import type { EngineWorkerCommand } from "../analysis/engine-worker-protocol.ts";
 
 const FULL_GAME = allSquares().map(formatSquare);
 const MIDGAME = ["d4", "a1", "e4", "a2", "f4"];
@@ -321,7 +320,9 @@ describe("replay screen", () => {
     expect(engineCard).not.toHaveTextContent(/not connected/u);
     expect(screen.queryByRole("heading", { name: "Position analysis" })).not.toBeInTheDocument();
     const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
-    expect(within(timeline).getAllByRole("button")).toHaveLength(2);
+    expect(within(timeline).queryAllByRole("button")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Board score" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Engine evaluation" })).not.toBeInTheDocument();
     expect(within(timeline).queryByRole("switch", { name: "Engine" })).not.toBeInTheDocument();
     expect(
       within(timeline).queryByRole("button", { name: "Analyze game" }),
@@ -346,49 +347,112 @@ describe("replay screen", () => {
     expect(scoreGraph.children).toHaveLength(MIDGAME.length + 2);
   });
 
-  it("switches the existing scrubber from score lead to engine evaluation", async () => {
+  it("shows engine evaluation and candidate lines automatically once analysis is available", async () => {
     runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+    const restoreWorker = installEngineWorkerProbe();
 
-    await openReplay();
-    await userEvent.click(screen.getByRole("button", { name: "Engine evaluation" }));
+    try {
+      await openReplay();
+      const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
+      expect(
+        within(timeline).queryByRole("img", { name: /Engine evaluation after each move/u }),
+      ).not.toBeInTheDocument();
 
-    expect(
-      screen.getByRole("img", { name: /Engine evaluation after each move/u }),
-    ).toHaveAccessibleName(/0 of 6 positions analyzed/u);
-    expect(scrubber()).toHaveAttribute(
-      "aria-valuetext",
-      expect.stringContaining("engine evaluation not available") as never,
-    );
-    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Engine settings" }));
-    const candidates = screen.getByRole("combobox", { name: "Candidate lines" });
-    expect(within(candidates).getAllByRole("option")).toHaveLength(5);
-    await userEvent.selectOptions(candidates, "3");
-    expect(candidates).toHaveValue("3");
+      await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
+      await waitFor(() => {
+        expect(EngineWorkerProbe.instances).toHaveLength(1);
+      });
+      const worker = EngineWorkerProbe.instances[0];
+      const requestId = worker?.posted[0]?.requestId;
+      if (worker === undefined || requestId === undefined) {
+        throw new Error("The engine Worker did not receive an analysis request.");
+      }
+
+      act(() => {
+        worker.emit({ type: "started", requestId });
+        worker.emit({
+          type: "progress",
+          requestId,
+          update: engineSuccess("g7", -3),
+          elapsedMs: 250,
+        });
+      });
+
+      expect(
+        await within(timeline).findByRole("img", { name: /Engine evaluation after each move/u }),
+      ).toHaveAccessibleName(/1 of 6 positions analyzed/u);
+      expect(scrubber()).toHaveAttribute(
+        "aria-valuetext",
+        expect.stringContaining("engine evaluation −1½") as never,
+      );
+      expect(
+        screen.getByRole("img", { name: /Engine candidate markers are shown/u }),
+      ).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Engine evaluation" })).not.toBeInTheDocument();
+
+      expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Engine settings" }));
+      const dialog = screen.getByRole("dialog", { name: "Engine settings" });
+      expect(within(dialog).getByRole("combobox", { name: "Candidate lines" })).toHaveValue("1");
+      expect(within(dialog).getAllByRole("option")).toHaveLength(5);
+      expect(within(dialog).getAllByRole("slider")).toHaveLength(2);
+      expect(within(dialog).getByRole("slider", { name: "Live analysis time" })).toHaveValue("0");
+      expect(
+        within(dialog).getByRole("slider", { name: "Game analysis time per move" }),
+      ).toHaveValue("0");
+    } finally {
+      restoreWorker();
+    }
+  });
+
+  it("uses the saved per-move budget for whole-game replay analysis", async () => {
+    runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
+    const restoreWorker = installEngineWorkerProbe();
+
+    try {
+      await openReplay();
+      await userEvent.click(screen.getByRole("button", { name: "Engine settings" }));
+      fireEvent.change(screen.getByRole("slider", { name: "Game analysis time per move" }), {
+        target: { value: "4" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await userEvent.click(screen.getByRole("button", { name: "Analyze game" }));
+
+      await waitFor(() => {
+        expect(EngineWorkerProbe.instances).toHaveLength(1);
+      });
+      expect(EngineWorkerProbe.instances[0]?.posted[0]?.request).toMatchObject({
+        moves: [],
+        searchTimeMs: 20_000,
+        multiPv: 1,
+      });
+    } finally {
+      restoreWorker();
+    }
   });
 
   it("keeps continuous analysis running as the selected replay position changes", async () => {
     runtime.gamesClient.fetchReplay.mockResolvedValue(gameReplay(MIDGAME));
-    const restoreWorker = installWorkerProbe();
+    const restoreWorker = installEngineWorkerProbe();
 
     try {
       await openReplay();
       await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
 
       await waitFor(() => {
-        expect(WorkerProbe.instances).toHaveLength(1);
+        expect(EngineWorkerProbe.instances).toHaveLength(1);
       });
-      expect(WorkerProbe.instances[0]?.posted[0]?.request.moves).toEqual(MIDGAME);
+      expect(EngineWorkerProbe.instances[0]?.posted[0]?.request.moves).toEqual(MIDGAME);
 
       fireEvent.change(scrubber(), { target: { value: "2" } });
       await waitFor(() => {
-        expect(WorkerProbe.instances).toHaveLength(2);
+        expect(EngineWorkerProbe.instances).toHaveLength(2);
       });
-      expect(WorkerProbe.instances[0]?.terminated).toBe(true);
-      expect(WorkerProbe.instances[1]?.posted[0]?.request.moves).toEqual(MIDGAME.slice(0, 2));
+      expect(EngineWorkerProbe.instances[0]?.terminated).toBe(true);
+      expect(EngineWorkerProbe.instances[1]?.posted[0]?.request.moves).toEqual(MIDGAME.slice(0, 2));
 
       await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
-      expect(WorkerProbe.instances[1]?.terminated).toBe(true);
+      expect(EngineWorkerProbe.instances[1]?.terminated).toBe(true);
     } finally {
       restoreWorker();
     }
@@ -470,44 +534,3 @@ describe("replay screen", () => {
     }
   });
 });
-
-class WorkerProbe {
-  static readonly instances: WorkerProbe[] = [];
-
-  onmessage: Worker["onmessage"] = null;
-  onerror: Worker["onerror"] = null;
-  onmessageerror: Worker["onmessageerror"] = null;
-  readonly posted: EngineWorkerCommand[] = [];
-  terminated = false;
-
-  constructor() {
-    WorkerProbe.instances.push(this);
-  }
-
-  postMessage(command: EngineWorkerCommand): void {
-    this.posted.push(command);
-  }
-
-  terminate(): void {
-    this.terminated = true;
-  }
-}
-
-function installWorkerProbe(): () => void {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Worker");
-  WorkerProbe.instances.length = 0;
-  browserEngineClient.dispose();
-  Object.defineProperty(globalThis, "Worker", {
-    configurable: true,
-    value: WorkerProbe,
-  });
-
-  return () => {
-    browserEngineClient.dispose();
-    if (descriptor === undefined) {
-      Reflect.deleteProperty(globalThis, "Worker");
-    } else {
-      Object.defineProperty(globalThis, "Worker", descriptor);
-    }
-  };
-}

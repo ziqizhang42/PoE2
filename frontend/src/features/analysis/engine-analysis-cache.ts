@@ -1,7 +1,6 @@
 import type { Move } from "@poe2/engine-wasm";
 
 import type { PositionAnalysisSettings } from "./analysis-settings.ts";
-import { searchTimeMs } from "./analysis-settings.ts";
 import type { EngineAnalysisReport } from "./engine-analysis.ts";
 
 export const ENGINE_ANALYSIS_CACHE_TTL_MS = 15 * 60 * 1_000;
@@ -45,7 +44,7 @@ export function readCachedEngineAnalysis(
   cache.set(key, touched);
   return {
     report: touched.report,
-    satisfiesRequest: touched.completedSearchTimeMs >= searchTimeMs(settings),
+    satisfiesRequest: touched.completedSearchTimeMs >= settings.searchTimeMs,
   };
 }
 
@@ -66,7 +65,7 @@ export function cacheEngineAnalysisResult(
   report: EngineAnalysisReport,
   now = Date.now(),
 ): EngineAnalysisReport {
-  return store(moves, settings, report, searchTimeMs(settings), now);
+  return store(moves, settings, report, settings.searchTimeMs, now);
 }
 
 /** Test and hot-reload escape hatch; ordinary UI code never needs to clear the cache. */

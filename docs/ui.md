@@ -49,7 +49,7 @@ Treat `/analysis?moves=...` as untrusted input: validate every coordinate by rep
 
 Engine access is isolated behind [`browser-engine-client.ts`](../frontend/src/features/analysis/browser-engine-client.ts). WASM search runs in one module Worker so the main thread remains responsive and the engine transposition table survives completed searches. Cancel synchronous work by terminating the Worker, and reject stale messages with request IDs.
 
-Engine evaluations are normalized to Player 1. Preserve the engine's candidate order rather than sorting the numeric values for the side to move, and treat the first line's equivalent placements as the same ranked choice. A replay's full-board position uses its exact final margin instead of starting a search with no legal move.
+Engine evaluations are normalized to Player 1. Preserve the engine's candidate order rather than sorting the numeric values for the side to move, and treat the first line's equivalent placements as the same ranked choice. Once a streamed or completed search result exists, the board automatically shows the engine-evaluation timeline and candidate markers; board score remains the fallback before that. A replay's full-board position uses its exact final margin instead of starting a search with no legal move.
 
 Completed results use a bounded, tab-local cache keyed by move history and candidate count. A longer time budget must still search, and a lower-node result must not replace a stronger cached result. Streamed depths may update the active readout, but only a finished search becomes a completed replay timeline point.
 
@@ -62,7 +62,7 @@ The engine is a build dependency: Vite emits the Worker and WASM asset for brows
 3. inspect the installed package's version, exports, and TypeScript contract instead of assuming they match the previous release; and
 4. run the frontend typecheck, analysis tests, and production bundle.
 
-Engine and API versions shown in the UI come from each engine response; application models must not encode a particular release version. UI-supported Multi-PV values live once in `analysis-settings.ts`, and cached reports from different engine or API versions are never compared as interchangeable search results. Serve emitted `.wasm` files as `application/wasm` in production.
+Engine and API versions shown in the UI come from each engine response; application models must not encode a particular release version. UI-supported time budgets and Multi-PV values live once in `analysis-settings.ts`, and cached reports from different engine or API versions are never compared as interchangeable search results. Serve emitted `.wasm` files as `application/wasm` in production.
 
 ## Clocks
 

@@ -22,7 +22,7 @@ describe("engine analysis adapter", () => {
   it("encodes the position and selected Multi-PV budget for the package API", () => {
     const moves = encodeEngineMoves([square("d4"), square("a1")]);
 
-    expect(engineAnalysisRequest(moves, { candidateCount: 3, timePreset: "deep" })).toEqual({
+    expect(engineAnalysisRequest(moves, { candidateCount: 3, searchTimeMs: 20_000 })).toEqual({
       moves: ["d4", "a1"],
       searchTimeMs: 20_000,
       multiPv: 3,

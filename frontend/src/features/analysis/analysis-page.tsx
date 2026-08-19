@@ -19,21 +19,14 @@ import { MoveHistory } from "../game/move-history.tsx";
 import { AnalysisBoard } from "./analysis-board.tsx";
 import { AnalysisControls } from "./analysis-controls.tsx";
 import { AnalysisReadout } from "./analysis-readout.tsx";
-import {
-  DEFAULT_POSITION_ANALYSIS_SETTINGS,
-  type PositionAnalysisSettings,
-} from "./analysis-settings.ts";
+import { positionAnalysisSettings } from "./analysis-settings.ts";
+import { useEngineSettings } from "./engine-settings-context.ts";
 import {
   candidateLineAt,
   candidatePlacementGroups,
-  isEngineAnalysisBusy,
   type EngineAnalysisState,
   visibleEngineReport,
 } from "./engine-analysis.ts";
-import {
-  EvaluationTimelineControls,
-  type EvaluationTimelineMode,
-} from "./evaluation-timeline-controls.tsx";
 import { analysisPath } from "./analysis-url.ts";
 import { useAnalysisLine } from "./use-analysis-line.ts";
 import { useEngineAnalysis } from "./use-engine-analysis.ts";
@@ -51,11 +44,12 @@ export function AnalysisPage() {
   const engine = useEngineAnalysis(game.moves);
   const analyzePosition = engine.analyze;
   const cancelAnalysis = engine.cancel;
-  const [settings, setSettings] = useState<PositionAnalysisSettings>(
-    DEFAULT_POSITION_ANALYSIS_SETTINGS,
+  const { settings, saveSettings } = useEngineSettings();
+  const livePositionSettings = useMemo(
+    () => positionAnalysisSettings(settings.liveAnalysisTimeMs, settings.candidateCount),
+    [settings.candidateCount, settings.liveAnalysisTimeMs],
   );
   const [continuousAnalysis, setContinuousAnalysis] = useState(false);
-  const [timelineMode, setTimelineMode] = useState<EvaluationTimelineMode>("score");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedRank, setSelectedRank] = useState(1);
   const shownEngineState: EngineAnalysisState = finished ? { status: "terminal" } : engine.state;
@@ -63,20 +57,21 @@ export function AnalysisPage() {
   const visibleSelectedRank =
     report === null ? selectedRank : candidateLineAt(report, selectedRank).rank;
   const candidateGroups = candidatePlacementGroups(report);
-  const engineBusy = isEngineAnalysisBusy(shownEngineState);
-  const engineEvaluations = finished
-    ? engine.evaluations.map((evaluation, ply) =>
-        ply === game.moves.length ? marginHalfPoints(scoreBoard(game.board)) : evaluation,
-      )
-    : engine.evaluations;
+  const hasEngineEvaluations = engine.evaluations.some((evaluation) => evaluation !== null);
+  const engineEvaluations =
+    finished && hasEngineEvaluations
+      ? engine.evaluations.map((evaluation, ply) =>
+          ply === game.moves.length ? marginHalfPoints(scoreBoard(game.board)) : evaluation,
+        )
+      : engine.evaluations;
 
   usePlyNavigationKeys({ ply: currentPly, finalPly, onSeek: control.seek });
 
   useEffect(() => {
     if (continuousAnalysis && !finished) {
-      analyzePosition(settings);
+      analyzePosition(livePositionSettings);
     }
-  }, [analyzePosition, continuousAnalysis, finished, settings]);
+  }, [analyzePosition, continuousAnalysis, finished, livePositionSettings]);
 
   return (
     <div className={TWO_UP}>
@@ -123,34 +118,31 @@ export function AnalysisPage() {
             aria-label="Evaluation timeline"
             className="mt-4 border-t border-line pt-4"
           >
-            <EvaluationTimelineControls mode={timelineMode} onModeChange={setTimelineMode} />
-            <div className="mt-3">
-              <Scrubber
-                progression={lineProgression}
-                ply={currentPly}
-                finalPly={finalPly}
-                boardFull={finished}
-                completeScoreTimeline
-                onSeek={control.seek}
-                {...(timelineMode === "engine"
-                  ? {
-                      timeline: (
-                        <EngineEvaluationStrip
-                          evaluations={engineEvaluations}
-                          currentPly={currentPly}
-                          finalPly={finalPly}
-                          axisFinalPly={finalPly}
-                        />
-                      ),
-                      positionValueText: engineEvaluationValueText(
-                        engineEvaluations,
-                        currentPly,
-                        finalPly,
-                      ),
-                    }
-                  : {})}
-              />
-            </div>
+            <Scrubber
+              progression={lineProgression}
+              ply={currentPly}
+              finalPly={finalPly}
+              boardFull={finished}
+              completeScoreTimeline
+              onSeek={control.seek}
+              {...(hasEngineEvaluations
+                ? {
+                    timeline: (
+                      <EngineEvaluationStrip
+                        evaluations={engineEvaluations}
+                        currentPly={currentPly}
+                        finalPly={finalPly}
+                        axisFinalPly={finalPly}
+                      />
+                    ),
+                    positionValueText: engineEvaluationValueText(
+                      engineEvaluations,
+                      currentPly,
+                      finalPly,
+                    ),
+                  }
+                : {})}
+            />
           </div>
 
           <AnalysisControls
@@ -175,7 +167,6 @@ export function AnalysisPage() {
           onSelectLine={setSelectedRank}
           controls={{
             settings,
-            settingsDisabled: engineBusy,
             settingsOpen,
             toggle: (
               <Switch
@@ -184,20 +175,15 @@ export function AnalysisPage() {
                 disabled={engine.state.status === "unavailable"}
                 onChange={(enabled) => {
                   setContinuousAnalysis(enabled);
-                  if (enabled) {
-                    setTimelineMode("engine");
-                  } else {
+                  if (!enabled) {
                     cancelAnalysis();
                   }
                 }}
               />
             ),
-            onSettingsChange: setSettings,
+            onSettingsSave: saveSettings,
             onSettingsOpenChange(open) {
               setSettingsOpen(open);
-              if (open) {
-                setTimelineMode("engine");
-              }
             },
           }}
         />

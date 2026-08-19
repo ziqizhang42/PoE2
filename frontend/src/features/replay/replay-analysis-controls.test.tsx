@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_POSITION_ANALYSIS_SETTINGS } from "../analysis/analysis-settings.ts";
+import { DEFAULT_ENGINE_SETTINGS } from "../analysis/analysis-settings.ts";
 import { EngineAnalysisCard } from "../analysis/engine-analysis-card.tsx";
 import { replayAnalysisCardControls } from "./replay-analysis-controls.tsx";
 
@@ -22,9 +22,9 @@ describe("ReplayAnalysisControls", () => {
       <ReplayAnalysisControls
         state={{ status: "unavailable", points: [] }}
         continuousPositionAnalysis={false}
-        positionSettings={DEFAULT_POSITION_ANALYSIS_SETTINGS}
+        settings={DEFAULT_ENGINE_SETTINGS}
         settingsOpen={false}
-        onPositionSettingsChange={vi.fn()}
+        onSettingsSave={vi.fn()}
         onSettingsOpenChange={vi.fn()}
         onTogglePositionAnalysis={vi.fn()}
         onAnalyzeGame={vi.fn()}
@@ -49,9 +49,9 @@ describe("ReplayAnalysisControls", () => {
           nodesPerSecond: null,
         }}
         continuousPositionAnalysis={false}
-        positionSettings={DEFAULT_POSITION_ANALYSIS_SETTINGS}
+        settings={DEFAULT_ENGINE_SETTINGS}
         settingsOpen
-        onPositionSettingsChange={vi.fn()}
+        onSettingsSave={vi.fn()}
         onSettingsOpenChange={vi.fn()}
         onTogglePositionAnalysis={vi.fn()}
         onAnalyzeGame={vi.fn()}
@@ -60,9 +60,9 @@ describe("ReplayAnalysisControls", () => {
     );
 
     expect(screen.getByText("1 of 3 positions analyzed.")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Candidate lines" })).toHaveValue("1");
-    expect(screen.getByText(/one line and 1 second per position/u)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("slider", { name: "Game analysis time per move" })).toHaveValue("0");
+    expect(screen.getByText(/choose Analyze game in a replay/u)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel game analysis" }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
@@ -72,9 +72,9 @@ describe("ReplayAnalysisControls", () => {
       <ReplayAnalysisControls
         state={{ status: "idle", points: [null] }}
         continuousPositionAnalysis={false}
-        positionSettings={DEFAULT_POSITION_ANALYSIS_SETTINGS}
+        settings={DEFAULT_ENGINE_SETTINGS}
         settingsOpen={false}
-        onPositionSettingsChange={vi.fn()}
+        onSettingsSave={vi.fn()}
         onSettingsOpenChange={vi.fn()}
         onTogglePositionAnalysis={onTogglePositionAnalysis}
         onAnalyzeGame={vi.fn()}
@@ -91,9 +91,9 @@ describe("ReplayAnalysisControls", () => {
       <ReplayAnalysisControls
         state={{ status: "ready", points: [null] }}
         continuousPositionAnalysis
-        positionSettings={DEFAULT_POSITION_ANALYSIS_SETTINGS}
+        settings={DEFAULT_ENGINE_SETTINGS}
         settingsOpen={false}
-        onPositionSettingsChange={vi.fn()}
+        onSettingsSave={vi.fn()}
         onSettingsOpenChange={vi.fn()}
         onTogglePositionAnalysis={onTogglePositionAnalysis}
         onAnalyzeGame={vi.fn()}

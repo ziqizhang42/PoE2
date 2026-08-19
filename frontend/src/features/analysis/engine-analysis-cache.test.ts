@@ -9,8 +9,8 @@ import {
   readCachedEngineAnalysis,
 } from "./engine-analysis-cache.ts";
 
-const FAST = { candidateCount: 1, timePreset: "fast" } as const;
-const DEEP = { candidateCount: 1, timePreset: "deep" } as const;
+const FAST = { candidateCount: 1, searchTimeMs: 1_000 } as const;
+const DEEP = { candidateCount: 1, searchTimeMs: 20_000 } as const;
 
 afterEach(clearEngineAnalysisCache);
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseSquare, type Square } from "@poe2/rules";
 
 import { engineSuccess, FakeEngineClient, TEST_ENGINE_VERSION } from "../../test/engine.ts";
+import { MAX_ANALYSIS_TIME_MS } from "./analysis-settings.ts";
 import { clearEngineAnalysisCache } from "./engine-analysis-cache.ts";
 import { useEngineAnalysis } from "./use-engine-analysis.ts";
 
@@ -25,7 +26,7 @@ describe("useEngineAnalysis", () => {
     expect(result.current.state).toEqual({ status: "idle" });
     expect(result.current.evaluations).toEqual([null, null]);
     act(() => {
-      result.current.analyze({ candidateCount: 3, timePreset: "balanced" });
+      result.current.analyze({ candidateCount: 3, searchTimeMs: 5_000 });
     });
 
     expect(result.current.state).toEqual({ status: "loading" });
@@ -85,7 +86,7 @@ describe("useEngineAnalysis", () => {
     const { result } = renderHook(() => useEngineAnalysis([], client));
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "deep" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 20_000 });
       client.searches[0]?.callbacks.onStarted();
       client.searches[0]?.callbacks.onProgress(engineSuccess("d4", -1), 250);
       result.current.cancel();
@@ -98,16 +99,35 @@ describe("useEngineAnalysis", () => {
     });
   });
 
+  it("finishes a 12-hour maximum search as soon as the engine returns a solution", () => {
+    const client = new FakeEngineClient();
+    const { result } = renderHook(() => useEngineAnalysis([], client));
+
+    act(() => {
+      result.current.analyze({ candidateCount: 1, searchTimeMs: MAX_ANALYSIS_TIME_MS });
+    });
+    expect(client.searches[0]?.request.searchTimeMs).toBe(43_200_000);
+
+    act(() => {
+      client.searches[0]?.callbacks.onResult(engineSuccess("d4", 9));
+    });
+
+    expect(result.current.state).toMatchObject({
+      status: "ready",
+      report: { evaluationHalfPoints: 9 },
+    });
+  });
+
   it("shows a new stream from depth one while retaining a stronger cached result", () => {
     const client = new FakeEngineClient();
     const { result } = renderHook(() => useEngineAnalysis([], client));
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
       client.searches[0]?.callbacks.onResult(
         engineSuccess("d4", 7, { completedDepth: 8, nodes: 50_000 }),
       );
-      result.current.analyze({ candidateCount: 1, timePreset: "deep" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 20_000 });
       client.searches[1]?.callbacks.onStarted();
       client.searches[1]?.callbacks.onProgress(
         engineSuccess("d4", 1, { completedDepth: 1, nodes: 100 }),
@@ -138,7 +158,7 @@ describe("useEngineAnalysis", () => {
     );
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
     });
     rerender({ moves: [square("d4"), square("a1")] });
 
@@ -154,14 +174,14 @@ describe("useEngineAnalysis", () => {
     );
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
       client.searches[0]?.callbacks.onResult(engineSuccess("a1", 5));
     });
     rerender({ moves: [square("d4"), square("a1")] });
     rerender({ moves: [square("d4")] });
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
     });
 
     expect(client.searches).toHaveLength(1);
@@ -180,12 +200,12 @@ describe("useEngineAnalysis", () => {
     );
 
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
       client.searches[0]?.callbacks.onResult(engineSuccess("a1", 5));
     });
     rerender({ moves: [square("d4"), square("a1")] });
     act(() => {
-      result.current.analyze({ candidateCount: 1, timePreset: "fast" });
+      result.current.analyze({ candidateCount: 1, searchTimeMs: 1_000 });
       client.searches[1]?.callbacks.onResult(engineSuccess("e4", -2));
     });
 

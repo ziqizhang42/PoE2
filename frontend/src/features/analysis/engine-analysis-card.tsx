@@ -1,18 +1,16 @@
 import { useId, type ReactNode } from "react";
 
 import { CARD } from "../../ui/classes.ts";
-import { AnalysisSettingsControl } from "./analysis-settings-control.tsx";
-import { analysisTimeChoice, type PositionAnalysisSettings } from "./analysis-settings.ts";
+import { AnalysisSettingsDialog } from "./analysis-settings-control.tsx";
+import { formatAnalysisTime, type EngineSettings } from "./analysis-settings.ts";
 
 export interface EngineAnalysisCardControls {
-  readonly settings: PositionAnalysisSettings;
-  readonly settingsDisabled: boolean;
+  readonly settings: EngineSettings;
   readonly settingsOpen: boolean;
-  readonly settingsNote?: ReactNode;
   readonly toggle: ReactNode;
   readonly actions?: ReactNode;
   readonly status?: ReactNode;
-  readonly onSettingsChange: (settings: PositionAnalysisSettings) => void;
+  readonly onSettingsSave: (settings: EngineSettings) => void;
   readonly onSettingsOpenChange: (open: boolean) => void;
 }
 
@@ -63,16 +61,17 @@ export function EngineAnalysisCard({
       </div>
 
       {controls?.settingsOpen === true ? (
-        <div id={settingsId} className="mb-4 rounded-md border border-line bg-sunken p-3">
-          <AnalysisSettingsControl
-            settings={controls.settings}
-            disabled={controls.settingsDisabled}
-            onChange={controls.onSettingsChange}
-          />
-          {controls.settingsNote === undefined ? null : (
-            <p className="mt-2 text-xs leading-relaxed text-ink-3">{controls.settingsNote}</p>
-          )}
-        </div>
+        <AnalysisSettingsDialog
+          dialogId={settingsId}
+          settings={controls.settings}
+          onSave={(settings) => {
+            controls.onSettingsSave(settings);
+            controls.onSettingsOpenChange(false);
+          }}
+          onDismiss={() => {
+            controls.onSettingsOpenChange(false);
+          }}
+        />
       ) : null}
 
       {controls?.status}
@@ -81,11 +80,9 @@ export function EngineAnalysisCard({
   );
 }
 
-function settingsSummary(settings: PositionAnalysisSettings): string {
-  const preset = analysisTimeChoice(settings.timePreset);
-  return `${preset.label} · ${preset.durationLabel} · ${String(settings.candidateCount)} ${
-    settings.candidateCount === 1 ? "line" : "lines"
-  }`;
+function settingsSummary(settings: EngineSettings): string {
+  const live = formatAnalysisTime(settings.liveAnalysisTimeMs, "short");
+  return `${String(settings.candidateCount)} ${settings.candidateCount === 1 ? "line" : "lines"} · Live ${live} · Game ${formatAnalysisTime(settings.gameAnalysisTimeMs, "short")}/move`;
 }
 
 function SettingsIcon() {

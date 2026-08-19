@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 
 import type { GameReplay } from "@poe2/protocol";
@@ -24,15 +24,9 @@ import { CARD, EYEBROW, H_LG, H_XL, NOTE, STACK, TWO_UP } from "../../ui/classes
 import { Chip } from "../../ui/chip.tsx";
 import { BoardMarksControl } from "../board-marks/board-marks-control.tsx";
 import { useBoardMarks } from "../board-marks/board-marks-context.ts";
-import {
-  DEFAULT_POSITION_ANALYSIS_SETTINGS,
-  type PositionAnalysisSettings,
-} from "../analysis/analysis-settings.ts";
+import { positionAnalysisSettings } from "../analysis/analysis-settings.ts";
+import { useEngineSettings } from "../analysis/engine-settings-context.ts";
 import { candidateLineAt, candidatePlacementGroups } from "../analysis/engine-analysis.ts";
-import {
-  EvaluationTimelineControls,
-  type EvaluationTimelineMode,
-} from "../analysis/evaluation-timeline-controls.tsx";
 import { MoveHistory } from "../game/move-history.tsx";
 import { isDecidedOnPoints } from "../outcome.ts";
 import { formatClock, formatTimeControl } from "../time-control.ts";
@@ -78,17 +72,23 @@ function Replay({ game }: { game: GameReplay }) {
   });
   const analyzeReplayPosition = analysis.analyzePosition;
   const cancelReplayAnalysis = analysis.cancel;
-  const [timelineMode, setTimelineMode] = useState<EvaluationTimelineMode>("score");
-  const [positionSettings, setPositionSettings] = useState<PositionAnalysisSettings>(
-    DEFAULT_POSITION_ANALYSIS_SETTINGS,
+  const { settings, saveSettings } = useEngineSettings();
+  const livePositionSettings = useMemo(
+    () => positionAnalysisSettings(settings.liveAnalysisTimeMs, settings.candidateCount),
+    [settings.candidateCount, settings.liveAnalysisTimeMs],
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [continuousPositionAnalysis, setContinuousPositionAnalysis] = useState(false);
   const [selectedRank, setSelectedRank] = useState(1);
-  const engineEvaluations = evaluationsThrough(analysis.state.points, playback.finalPly);
   const selectedPoint = visibleAnalysisPointAt(analysis.state, playback.ply);
-  const selectedReport =
-    timelineMode === "engine" && selectedPoint?.kind === "search" ? selectedPoint.report : null;
+  const selectedReport = selectedPoint?.kind === "search" ? selectedPoint.report : null;
+  const analysisProgress = analysis.state.status === "analyzing" ? analysis.state.progress : null;
+  const hasEngineEvaluations =
+    analysisProgress !== null || analysis.state.points.some((point) => point?.kind === "search");
+  const engineEvaluations = evaluationsThrough(analysis.state.points, playback.finalPly).map(
+    (evaluation, ply) =>
+      ply === analysisProgress?.ply ? analysisProgress.report.evaluationHalfPoints : evaluation,
+  );
   const visibleSelectedRank =
     selectedReport === null ? selectedRank : candidateLineAt(selectedReport, selectedRank).rank;
   const candidateGroups = candidatePlacementGroups(selectedReport);
@@ -97,17 +97,13 @@ function Replay({ game }: { game: GameReplay }) {
   const engineControls = replayAnalysisCardControls({
     state: analysis.state,
     continuousPositionAnalysis,
-    positionSettings,
+    settings,
     settingsOpen,
-    onPositionSettingsChange: setPositionSettings,
+    onSettingsSave: saveSettings,
     onSettingsOpenChange(open) {
       setSettingsOpen(open);
-      if (open) {
-        setTimelineMode("engine");
-      }
     },
     onTogglePositionAnalysis() {
-      setTimelineMode("engine");
       if (continuousPositionAnalysis) {
         setContinuousPositionAnalysis(false);
         cancelReplayAnalysis();
@@ -116,9 +112,8 @@ function Replay({ game }: { game: GameReplay }) {
       }
     },
     onAnalyzeGame() {
-      setTimelineMode("engine");
       setContinuousPositionAnalysis(false);
-      analysis.analyzeGame();
+      analysis.analyzeGame(positionAnalysisSettings(settings.gameAnalysisTimeMs));
     },
     onCancel: analysis.cancel,
   });
@@ -137,14 +132,14 @@ function Replay({ game }: { game: GameReplay }) {
       cancelReplayAnalysis();
       return;
     }
-    analyzeReplayPosition(playback.ply, positionSettings);
+    analyzeReplayPosition(playback.ply, livePositionSettings);
   }, [
     analyzeReplayPosition,
     cancelReplayAnalysis,
     continuousPositionAnalysis,
     currentPositionIsTerminal,
     playback.ply,
-    positionSettings,
+    livePositionSettings,
   ]);
 
   const winnerName =
@@ -210,34 +205,31 @@ function Replay({ game }: { game: GameReplay }) {
             aria-label="Evaluation timeline"
             className="mt-4 border-t border-line pt-4"
           >
-            <EvaluationTimelineControls mode={timelineMode} onModeChange={setTimelineMode} />
-            <div className="mt-3">
-              <Scrubber
-                progression={playback.script.progression}
-                ply={playback.ply}
-                finalPly={playback.finalPly}
-                boardFull={boardFull}
-                completeScoreTimeline
-                onSeek={playback.seek}
-                {...(timelineMode === "engine"
-                  ? {
-                      timeline: (
-                        <EngineEvaluationStrip
-                          evaluations={engineEvaluations}
-                          currentPly={playback.ply}
-                          finalPly={playback.finalPly}
-                          axisFinalPly={playback.finalPly}
-                        />
-                      ),
-                      positionValueText: engineEvaluationValueText(
-                        engineEvaluations,
-                        playback.ply,
-                        playback.finalPly,
-                      ),
-                    }
-                  : {})}
-              />
-            </div>
+            <Scrubber
+              progression={playback.script.progression}
+              ply={playback.ply}
+              finalPly={playback.finalPly}
+              boardFull={boardFull}
+              completeScoreTimeline
+              onSeek={playback.seek}
+              {...(hasEngineEvaluations
+                ? {
+                    timeline: (
+                      <EngineEvaluationStrip
+                        evaluations={engineEvaluations}
+                        currentPly={playback.ply}
+                        finalPly={playback.finalPly}
+                        axisFinalPly={playback.finalPly}
+                      />
+                    ),
+                    positionValueText: engineEvaluationValueText(
+                      engineEvaluations,
+                      playback.ply,
+                      playback.finalPly,
+                    ),
+                  }
+                : {})}
+            />
           </div>
         </section>
 

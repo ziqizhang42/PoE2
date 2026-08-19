@@ -2,13 +2,7 @@ import type { AnalysisError, AnalysisRequest, AnalysisSuccess, Move } from "@poe
 import { formatSquare, parseSquare, type Square } from "@poe2/rules";
 
 import type { PositionAnalysisSettings } from "./analysis-settings.ts";
-import { searchTimeMs } from "./analysis-settings.ts";
 import type { EngineAnalysisReport, EngineCandidateLine } from "./engine-analysis.ts";
-
-export const GAME_ANALYSIS_SETTINGS: PositionAnalysisSettings = {
-  candidateCount: 1,
-  timePreset: "fast",
-};
 
 export function encodeEngineMoves(moves: readonly Square[]): readonly Move[] {
   return moves.map((move) => formatSquare(move) as Move);
@@ -20,7 +14,7 @@ export function engineAnalysisRequest(
 ): AnalysisRequest {
   return {
     moves,
-    searchTimeMs: searchTimeMs(settings),
+    searchTimeMs: settings.searchTimeMs,
     multiPv: settings.candidateCount,
   };
 }

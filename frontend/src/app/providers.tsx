@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router";
 import { RuntimeContext, type AppRuntime } from "../runtime/context.ts";
 import { createAppRuntime } from "../runtime/create-runtime.ts";
 import { RuntimeBootstrap } from "../runtime/runtime-bootstrap.tsx";
+import { EngineSettingsProvider } from "../features/analysis/engine-settings-provider.tsx";
 import { BoardMarksProvider } from "../features/board-marks/board-marks-provider.tsx";
 import { ThemeProvider } from "../theme/theme-provider.tsx";
 
@@ -22,10 +23,12 @@ export function AppProviders({ children, runtime }: AppProvidersProps) {
       <QueryClientProvider client={active.queryClient}>
         <RuntimeContext value={active}>
           <ThemeProvider>
-            <BoardMarksProvider>
-              <RuntimeBootstrap />
-              {children}
-            </BoardMarksProvider>
+            <EngineSettingsProvider>
+              <BoardMarksProvider>
+                <RuntimeBootstrap />
+                {children}
+              </BoardMarksProvider>
+            </EngineSettingsProvider>
           </ThemeProvider>
         </RuntimeContext>
       </QueryClientProvider>

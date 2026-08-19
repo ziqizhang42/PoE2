@@ -28,7 +28,7 @@ describe("useGameAnalysis", () => {
     );
 
     act(() => {
-      result.current.analyzePosition(1, { candidateCount: 4, timePreset: "deep" });
+      result.current.analyzePosition(1, { candidateCount: 4, searchTimeMs: 20_000 });
     });
     expect(client.searches[0]?.request).toEqual({
       moves: ["d4"],
@@ -92,7 +92,7 @@ describe("useGameAnalysis", () => {
       evaluationHalfPoints: -7,
     });
     act(() => {
-      result.current.analyzeGame();
+      result.current.analyzeGame({ candidateCount: 1, searchTimeMs: 1_000 });
     });
     expect(client.searches[0]?.request.moves).toEqual([]);
 
@@ -132,7 +132,7 @@ describe("useGameAnalysis", () => {
     );
 
     act(() => {
-      result.current.analyzeGame();
+      result.current.analyzeGame({ candidateCount: 1, searchTimeMs: 1_000 });
       client.searches[0]?.callbacks.onStarted();
       client.searches[0]?.callbacks.onResult(engineSuccess("d4", 5));
     });
@@ -155,7 +155,7 @@ describe("useGameAnalysis", () => {
         client,
       ),
     );
-    const settings = { candidateCount: 1, timePreset: "fast" } as const;
+    const settings = { candidateCount: 1, searchTimeMs: 1_000 } as const;
 
     act(() => {
       result.current.analyzePosition(1, settings);

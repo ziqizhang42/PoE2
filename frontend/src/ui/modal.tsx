@@ -19,12 +19,14 @@ const PANEL_WIDTH = {
 
 export function Modal({
   labelledBy,
+  panelId,
   width = "compact",
   panelClassName = "",
   onDismiss,
   children,
 }: {
   readonly labelledBy: string;
+  readonly panelId?: string;
   readonly width?: keyof typeof PANEL_WIDTH;
   readonly panelClassName?: string;
   /** Omit to disable Escape and backdrop dismissal. */
@@ -58,6 +60,7 @@ export function Modal({
     >
       <div
         ref={panel}
+        id={panelId}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}

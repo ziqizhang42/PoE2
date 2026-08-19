@@ -1,11 +1,13 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { allSquares, formatSquare } from "@poe2/rules";
 
 import { createFakeAuthClient, createTestRuntime } from "../../test/fakes.ts";
+import { engineSuccess, EngineWorkerProbe, installEngineWorkerProbe } from "../../test/engine.ts";
 import { renderApp } from "../../test/render.tsx";
+import { ANALYSIS_TIME_CHOICES } from "./analysis-settings.ts";
 
 function runtime() {
   return createTestRuntime({
@@ -38,10 +40,8 @@ describe("analysis page", () => {
     expect(scorePanel).not.toHaveTextContent(/ahead|after move/u);
     expect(within(scorePanel).getByText("Player 1")).toBeInTheDocument();
     expect(within(scorePanel).getByText("Player 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Board score" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByRole("button", { name: "Board score" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Engine evaluation" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Engine settings" })).toHaveAttribute(
       "aria-expanded",
       "false",
@@ -51,7 +51,7 @@ describe("analysis page", () => {
     const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
     expect(within(engineCard).getByRole("switch", { name: "Engine" })).toBeInTheDocument();
     expect(within(engineCard).getByRole("button", { name: "Engine settings" })).toBeInTheDocument();
-    expect(within(timeline).getAllByRole("button")).toHaveLength(2);
+    expect(within(timeline).queryAllByRole("button")).toHaveLength(0);
     expect(within(timeline).queryByRole("switch", { name: "Engine" })).not.toBeInTheDocument();
     expect(
       within(timeline).queryByRole("button", { name: "Engine settings" }),
@@ -62,31 +62,67 @@ describe("analysis page", () => {
   it("lets the analysis settings be prepared before a search", async () => {
     await openAnalysis();
     await userEvent.click(screen.getByRole("button", { name: "Engine settings" }));
-    const candidates = screen.getByRole("combobox", { name: "Candidate lines" });
+    const dialog = screen.getByRole("dialog", { name: "Engine settings" });
+    const candidates = within(dialog).getByRole("combobox", { name: "Candidate lines" });
+    const live = within(dialog).getByRole("slider", { name: "Live analysis time" });
+    const game = within(dialog).getByRole("slider", { name: "Game analysis time per move" });
 
+    expect(dialog).toBeInTheDocument();
     await userEvent.selectOptions(candidates, "5");
-    await userEvent.click(screen.getByRole("button", { name: "Deep · 20s" }));
+    fireEvent.change(live, { target: { value: String(ANALYSIS_TIME_CHOICES.length - 1) } });
+    fireEvent.change(game, { target: { value: "4" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    expect(candidates).toHaveValue("5");
-    expect(screen.getByRole("button", { name: "Deep · 20s" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    expect(screen.queryByRole("dialog", { name: "Engine settings" })).not.toBeInTheDocument();
+    expect(screen.getByText("5 lines · Live 12 hr · Game 20 sec/move")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Engine settings" })).toHaveAttribute(
+      "title",
+      "Engine settings: 5 lines · Live 12 hr · Game 20 sec/move",
     );
-    expect(screen.getByText("Deep · 20s · 5 lines")).toBeInTheDocument();
   });
 
-  it("switches the board strip from score to known engine evaluations", async () => {
-    await openAnalysis("/analysis?moves=d4,a1");
+  it("shows engine evaluations and candidate lines automatically when they become available", async () => {
+    const restoreWorker = installEngineWorkerProbe();
 
-    await userEvent.click(screen.getByRole("button", { name: "Engine evaluation" }));
+    try {
+      await openAnalysis("/analysis?moves=d4,a1");
+      const timeline = screen.getByRole("group", { name: "Evaluation timeline" });
+      expect(
+        within(timeline).queryByRole("img", { name: /Engine evaluation after each move/u }),
+      ).not.toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: "Engine evaluation" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      screen.getByRole("img", { name: /Engine evaluation after each move/u }),
-    ).toHaveAccessibleName(/0 of 3 positions analyzed/u);
+      await userEvent.click(screen.getByRole("switch", { name: "Engine" }));
+      await waitFor(() => {
+        expect(EngineWorkerProbe.instances).toHaveLength(1);
+      });
+      const worker = EngineWorkerProbe.instances[0];
+      const requestId = worker?.posted[0]?.requestId;
+      if (worker === undefined || requestId === undefined) {
+        throw new Error("The engine Worker did not receive an analysis request.");
+      }
+
+      act(() => {
+        worker.emit({ type: "started", requestId });
+        worker.emit({
+          type: "progress",
+          requestId,
+          update: engineSuccess("e4", 4),
+          elapsedMs: 250,
+        });
+      });
+
+      expect(
+        await within(timeline).findByRole("img", { name: /Engine evaluation after each move/u }),
+      ).toHaveAccessibleName(/1 of 3 positions analyzed/u);
+      expect(screen.getByRole("slider", { name: "Position after ply" })).toHaveAttribute(
+        "aria-valuetext",
+        expect.stringContaining("engine evaluation +2") as never,
+      );
+      expect(screen.getByRole("gridcell", { name: /e4.+engine candidate rank 1/u })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Engine evaluation" })).not.toBeInTheDocument();
+    } finally {
+      restoreWorker();
+    }
   });
 
   it("plays legal moves and writes the current line into the URL", async () => {

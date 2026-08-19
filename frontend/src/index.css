@@ -219,6 +219,46 @@
     var(--lift-2);
 }
 
+/* Non-linear engine time stops share one continuous-looking, theme-aware track. */
+.engine-time-slider {
+  appearance: none;
+  height: 0.375rem;
+  cursor: pointer;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--pen-1) 0 var(--slider-position),
+    var(--line) var(--slider-position) 100%
+  );
+}
+
+.engine-time-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 3px solid var(--surface);
+  border-radius: 9999px;
+  background: var(--pen-1);
+  box-shadow:
+    0 0 0 1px var(--pen-1),
+    var(--lift);
+}
+
+.engine-time-slider::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 3px solid var(--surface);
+  border-radius: 9999px;
+  background: var(--pen-1);
+  box-shadow:
+    0 0 0 1px var(--pen-1),
+    var(--lift);
+}
+
+.engine-time-slider:focus-visible {
+  outline-offset: 6px;
+}
+
 /* Engine ranks use the root player's hue; lower-ranked lines recede without
    making the independently selected line look like a different player. */
 .engine-candidate-rank {

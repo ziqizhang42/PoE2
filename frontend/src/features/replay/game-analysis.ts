@@ -59,7 +59,7 @@ export type GameAnalysisState =
 export interface GameAnalysisController {
   readonly state: GameAnalysisState;
   readonly analyzePosition: (ply: number, settings: PositionAnalysisSettings) => void;
-  readonly analyzeGame: () => void;
+  readonly analyzeGame: (settings: PositionAnalysisSettings) => void;
   readonly cancel: () => void;
 }
 

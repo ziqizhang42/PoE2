@@ -12,7 +12,6 @@ import {
   engineAnalysisError,
   engineAnalysisReport,
   engineAnalysisRequest,
-  GAME_ANALYSIS_SETTINGS,
   invalidEngineResponse,
 } from "../analysis/engine-analysis-adapter.ts";
 import {
@@ -203,70 +202,73 @@ export function useGameAnalysis(
     [encodedMoves, publish, startSearch],
   );
 
-  const analyzeGame = useCallback(() => {
-    activeRef.current?.handle?.cancel();
-    const activity: GameAnalysisActivity = {
-      kind: "game",
-      totalPositions: encodedMoves.length + 1,
-    };
-    const active: ActiveGameAnalysis = { activity, handle: null };
-    activeRef.current = active;
+  const analyzeGame = useCallback(
+    (settings: PositionAnalysisSettings) => {
+      activeRef.current?.handle?.cancel();
+      const activity: GameAnalysisActivity = {
+        kind: "game",
+        totalPositions: encodedMoves.length + 1,
+      };
+      const active: ActiveGameAnalysis = { activity, handle: null };
+      activeRef.current = active;
 
-    const searchNext = () => {
-      if (activeRef.current !== active) {
-        return;
-      }
-      const ply = nextMissingPly(stateRef.current.points);
-      if (ply === null) {
-        const points = stateRef.current.points;
+      const searchNext = () => {
+        if (activeRef.current !== active) {
+          return;
+        }
+        const ply = nextMissingPly(stateRef.current.points);
+        if (ply === null) {
+          const points = stateRef.current.points;
+          activeRef.current = null;
+          publish({ status: "ready", points });
+          return;
+        }
+
+        const cached = readCachedEngineAnalysis(encodedMoves.slice(0, ply), settings);
+        if (cached?.satisfiesRequest === true) {
+          const points = replacePoint(stateRef.current.points, {
+            kind: "search",
+            ply,
+            report: cached.report,
+          });
+          publish({
+            status: "analyzing",
+            points,
+            activity,
+            progress: null,
+            nodesPerSecond: null,
+          });
+          searchNext();
+          return;
+        }
+
+        startSearch(active, ply, settings, cached?.report ?? null, (report) => {
+          const points = replacePoint(stateRef.current.points, {
+            kind: "search",
+            ply,
+            report,
+          });
+          publish({
+            status: "analyzing",
+            points,
+            activity,
+            progress: null,
+            nodesPerSecond: null,
+          });
+          searchNext();
+        });
+      };
+
+      if (nextMissingPly(stateRef.current.points) === null) {
         activeRef.current = null;
-        publish({ status: "ready", points });
+        publish({ status: "ready", points: stateRef.current.points });
         return;
       }
-
-      const cached = readCachedEngineAnalysis(encodedMoves.slice(0, ply), GAME_ANALYSIS_SETTINGS);
-      if (cached?.satisfiesRequest === true) {
-        const points = replacePoint(stateRef.current.points, {
-          kind: "search",
-          ply,
-          report: cached.report,
-        });
-        publish({
-          status: "analyzing",
-          points,
-          activity,
-          progress: null,
-          nodesPerSecond: null,
-        });
-        searchNext();
-        return;
-      }
-
-      startSearch(active, ply, GAME_ANALYSIS_SETTINGS, cached?.report ?? null, (report) => {
-        const points = replacePoint(stateRef.current.points, {
-          kind: "search",
-          ply,
-          report,
-        });
-        publish({
-          status: "analyzing",
-          points,
-          activity,
-          progress: null,
-          nodesPerSecond: null,
-        });
-        searchNext();
-      });
-    };
-
-    if (nextMissingPly(stateRef.current.points) === null) {
-      activeRef.current = null;
-      publish({ status: "ready", points: stateRef.current.points });
-      return;
-    }
-    publish({ status: "loading", points: stateRef.current.points, activity });
-    searchNext();
-  }, [encodedMoves, publish, startSearch]);
+      publish({ status: "loading", points: stateRef.current.points, activity });
+      searchNext();
+    },
+    [encodedMoves, publish, startSearch],
+  );
 
   const cancel = useCallback(() => {
     const active = activeRef.current;

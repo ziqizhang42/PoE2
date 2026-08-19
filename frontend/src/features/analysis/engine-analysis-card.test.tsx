@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Switch } from "../../ui/switch.tsx";
-import { DEFAULT_POSITION_ANALYSIS_SETTINGS } from "./analysis-settings.ts";
+import { DEFAULT_ENGINE_SETTINGS } from "./analysis-settings.ts";
 import { EngineAnalysisCard } from "./engine-analysis-card.tsx";
 
 describe("EngineAnalysisCard", () => {
@@ -26,11 +26,10 @@ describe("EngineAnalysisCard", () => {
       <EngineAnalysisCard
         titleId="engine-title"
         controls={{
-          settings: DEFAULT_POSITION_ANALYSIS_SETTINGS,
-          settingsDisabled: false,
+          settings: DEFAULT_ENGINE_SETTINGS,
           settingsOpen: false,
           toggle: <Switch accessibleLabel="Engine" checked={false} onChange={vi.fn()} />,
-          onSettingsChange: vi.fn(),
+          onSettingsSave: vi.fn(),
           onSettingsOpenChange,
         }}
       >
@@ -53,17 +52,20 @@ describe("EngineAnalysisCard", () => {
       <EngineAnalysisCard
         titleId="engine-title"
         controls={{
-          settings: DEFAULT_POSITION_ANALYSIS_SETTINGS,
-          settingsDisabled: false,
+          settings: DEFAULT_ENGINE_SETTINGS,
           settingsOpen: true,
           toggle: <Switch accessibleLabel="Engine" checked={false} onChange={vi.fn()} />,
-          onSettingsChange: vi.fn(),
+          onSettingsSave: vi.fn(),
           onSettingsOpenChange,
         }}
       >
         <p>Engine result</p>
       </EngineAnalysisCard>,
     );
-    expect(within(card).getByRole("combobox", { name: "Candidate lines" })).toHaveValue("1");
+    expect(within(card).getByRole("dialog", { name: "Engine settings" })).toBeInTheDocument();
+    expect(within(card).getByRole("slider", { name: "Live analysis time" })).toHaveValue("0");
+    expect(within(card).getByRole("slider", { name: "Game analysis time per move" })).toHaveValue(
+      "0",
+    );
   });
 });
